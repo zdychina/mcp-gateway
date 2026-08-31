@@ -1,0 +1,76 @@
+spring:
+  application:
+    name: mcp-gateway
+
+  datasource:
+    # H2 文件库，单机单进程部署（需求 14）。
+    url: jdbc:h2:file:${MCP_GATEWAY_DB_PATH:./data/mcp-gateway};AUTO_SERVER=FALSE;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: ${MCP_GATEWAY_DB_USER:sa}
+    password: ${MCP_GATEWAY_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 10
+      pool-name: mcp-gateway-pool
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: false
+    locations: classpath:db/migration
+
+  jackson:
+    default-property-inclusion: always
+
+server:
+  servlet:
+    encoding:
+      charset: UTF-8
+      # 静态资源（app.js / app.css）里有中文注释与文案。Spring 默认以 text/javascript
+      # 不带 charset 返回，浏览器只能回退到文档编码去猜。强制声明 UTF-8 去掉这个依赖。
+      force-response: true
+  # 需求 12.6：本地部署默认只监听 localhost。内网部署需显式覆盖 server.address。
+  address: ${MCP_GATEWAY_BIND_ADDRESS:127.0.0.1}
+  port: ${MCP_GATEWAY_PORT:8080}
+  error:
+    include-stacktrace: never
+    include-message: never
+
+mcp-gateway:
+  # 需求 FR-05.1：Agent 接入 JSON 里的 baseUrl 只能来自部署配置，
+  # 绝不允许根据 Host / X-Forwarded-* 等不可信请求头拼接。
+  base-url: ${MCP_GATEWAY_BASE_URL:http://127.0.0.1:8080}
+
+  security:
+    # 需求 12.1 / 12.2：主密钥只能来自环境变量，代码和配置文件里不得有默认值。
+    # Base64 编码的 32 字节密钥，缺失或长度不对时应用启动失败。
+    master-key: ${MCP_GATEWAY_MASTER_KEY:}
+    # 需求 12.6：允许的 Origin，逗号分隔；为空表示只接受不带 Origin 的请求。
+    allowed-origins: ${MCP_GATEWAY_ALLOWED_ORIGINS:}
+
+  downstream:
+    # 需求 6.6.5：默认下游调用超时 30 秒，可通过配置调整。
+    call-timeout: 30s
+    connect-timeout: 10s
+    # 需求 12.9：下游响应体大小上限，默认 1 MiB。
+    max-response-size: 1048576
+
+  server:
+    # 需求 12.9：Agent 请求体大小上限，默认 1 MiB。
+    max-request-size: 1048576
+    # 需求 6.2.1：每个网关最多 3 个子 MCP。
+    max-downstream-per-gateway: 3
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # 管理端没有登录，除健康检查外不放开任何 actuator 端点（需求 12.8）。
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  level:
+    root: INFO
+    com.mcpgateway: INFO
+    io.modelcontextprotocol: INFO

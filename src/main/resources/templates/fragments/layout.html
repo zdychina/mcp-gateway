@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:fragment="head(title)">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title th:text="${title} + ' · MCP 聚合网关'">MCP 聚合网关</title>
+  <!-- Bootstrap 与脚本都放在本地：内网部署可能没有外网，CDN 会让界面直接不可用。 -->
+  <link rel="stylesheet" th:href="@{/css/bootstrap.min.css}">
+  <link rel="stylesheet" th:href="@{/css/app.css}">
+</head>
+<body>
+
+<nav th:fragment="navbar" class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+  <div class="container">
+    <a class="navbar-brand" th:href="@{/ui/gateways}">MCP 聚合网关</a>
+    <span class="navbar-text small text-warning">
+      管理端无登录，仅限本机或可信内网访问
+    </span>
+  </div>
+</nav>
+
+<!-- 所有异步操作的反馈都渲染进这里，避免每个按钮各写一套提示。 -->
+<div th:fragment="alerts" id="alerts" class="container"></div>
+
+<div th:fragment="scripts">
+  <script th:src="@{/js/app.js}"></script>
+</div>
+
+</body>
+</html>

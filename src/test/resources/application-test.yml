@@ -1,0 +1,23 @@
+# 测试 profile：只覆盖需要改的键，其余全部沿用 src/main/resources/application.yml。
+#
+# 刻意不叫 application.yml —— 那个名字会和主配置同为 classpath:/application.yml，
+# 而 test-classes 在类路径靠前，主配置会被整份遮蔽掉，测试也就永远验不到线上的默认值。
+spring:
+  datasource:
+    # 测试用内存库，每次构建从空库跑一遍完整 Flyway 迁移。
+    url: jdbc:h2:mem:mcp-gateway-test;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  flyway:
+    enabled: true
+    clean-disabled: false
+
+mcp-gateway:
+  base-url: http://localhost:8080
+  # security.master-key 由 AbstractDataTest 的 @DynamicPropertySource 随机生成，
+  # 刻意不在仓库里留任何密钥（需求 12.1）。
+
+logging:
+  level:
+    org.flywaydb: INFO

@@ -1,0 +1,30 @@
+/* 只放 Bootstrap 没覆盖到的少量调整。 */
+
+body {
+    background-color: #f7f8fa;
+}
+
+.font-monospace {
+    font-size: 0.9em;
+}
+
+/* 接入 JSON 和导入框都是要整段读的内容，别自动换行打乱缩进。 */
+textarea#agent-config,
+textarea#import-json {
+    white-space: pre;
+    overflow-wrap: normal;
+    overflow-x: auto;
+}
+
+/* 令牌是一次性显示的，给它足够的视觉重量。 */
+#token-panel {
+    border-width: 2px;
+}
+
+#alerts .alert {
+    margin-bottom: 0.75rem;
+}
+
+#alerts .alert .small {
+    white-space: pre-wrap;
+}

@@ -1,0 +1,33 @@
+services:
+  mcp-gateway:
+    build: .
+    image: mcp-gateway:0.1.0
+    container_name: mcp-gateway
+    restart: unless-stopped
+
+    environment:
+      # 必填，没有默认值。生成方式：openssl rand -base64 32
+      MCP_GATEWAY_MASTER_KEY: ${MCP_GATEWAY_MASTER_KEY:?请先设置 MCP_GATEWAY_MASTER_KEY}
+      # Agent 接入 JSON 里的地址。必须是 Agent 实际能访问到的地址，
+      # 不能用容器内部的 127.0.0.1（需求 FR-05.1）。
+      MCP_GATEWAY_BASE_URL: ${MCP_GATEWAY_BASE_URL:-http://127.0.0.1:8080}
+      MCP_GATEWAY_ALLOWED_ORIGINS: ${MCP_GATEWAY_ALLOWED_ORIGINS:-}
+
+    ports:
+      # 只发布到本机回环。管理端没有登录，绑到 0.0.0.0 等于把它交给整个网络
+      # （需求 4.3 / 12.8）。内网部署请改成具体的内网地址，并放在反向代理后面。
+      - "127.0.0.1:8080:8080"
+
+    volumes:
+      # H2 文件库。库里含知识库返回的内容，按部署要求保护（需求 FR-06.4）。
+      - mcp-gateway-data:/app/data
+
+    # 容器内部不需要写根文件系统，收紧一点。
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  mcp-gateway-data:
