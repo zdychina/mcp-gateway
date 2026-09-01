@@ -4,3 +4,6 @@ data/
 .idea/
 *.iml
 *.log
+# 前端依赖和产物都在镜像里重新构建，不从宿主机带进去
+frontend/node_modules/
+src/main/resources/static/app/

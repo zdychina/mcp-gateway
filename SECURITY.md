@@ -40,6 +40,14 @@
 **这层保护很容易被无意破坏**：给任何接口加 `@CrossOrigin`、注册 `addCorsMappings`、
 或让接口接受表单编码，都会打开缺口。`SecurityInvariantsTest.noCorsIsEnabled` 会在构建期拦住前两种。
 
+**这也是管理前端不做独立部署的原因。** 前端（`frontend/`，Vite + Vue）的产物打进
+`src/main/resources/static/app/`，随 jar 一起发布，与 API 同源；开发期由 Vite 的
+`server.proxy` 转发 `/api`，浏览器看到的同样是同源请求。两种形态都不需要 CORS。
+
+把前端拆成独立部署单元就必须放开 CORS，上面第 2 点会直接消失，而管理端**没有登录可以兜底**
+——任何网站都能对用户本机的网关发请求，列配置、改子 MCP、轮换令牌、删网关。
+真要走这条路，**先给管理端做认证**，有了凭证校验之后 CORS 才有得谈。
+
 ### 3. 令牌轮换没有过渡期
 
 `mcp_gateway` 只有一个 `access_token_hash`，轮换即刻让在用的 Agent 断连。
@@ -48,7 +56,22 @@
 ### 4. 调用记录含知识库返回的内容
 
 `request_json` / `response_json` 按 FR-06.4 原样保存，其中可能有敏感业务内容。
-数据库文件必须按部署要求保护（compose 里放在具名卷中）。MVP 不提供记录的清理策略（FR-06.5）。
+数据库文件必须按部署要求保护（compose 里放在具名卷中）。**目前没有任何清理或归档策略** ——
+记录只在删除网关时被级联删掉，长期运行会持续增长。
+
+**这些内容现在有了 HTTP 出口。** `GET /api/gateways/{id}/call-records/{callId}` 会返回
+完整的入参和返回正文，而管理端没有登录 —— 这个接口的暴露面等同于数据库文件本身。
+两处收敛：
+
+- **列表接口不带正文**。`GET .../call-records` 只返回摘要（工具名、状态、耗时、错误码），
+  正文只能按 `callId` 一条一条取。这样一次请求捞不走成批的业务内容，
+  由 `CallRecordApiTest.listNeverCarriesPayloads` 在构建期把关。
+- **按网关隔离**。列表永远带 `gateway_id` 条件，取单条时再校验归属；拿别的网关的 `callId`
+  来查会得到和"不存在"完全一致的 `CALL_RECORD_NOT_FOUND`。`callId` 是 UUID 猜不到，
+  但"猜不到"不是访问控制。
+
+反过来，记录里**不会**有凭证：需求 FR-06.3 规定任何 header、网关访问令牌和子 MCP 凭证
+都不得进入调用记录，打点服务本身就拿不到它们；`error_message` 也是已脱敏的摘要。
 
 ### 5. 依赖漏洞扫描不在默认构建里
 
@@ -73,3 +96,7 @@
 - `GlobalExceptionHandler`：兜底分支很容易把不该暴露的异常内容带出去
 - `application.yml` 的 `server.address`、`management.endpoints`、`mcp-gateway.security`
 - 任何新增的 `@RestController`：确认没有引入 CORS，且不接受表单编码
+- `frontend/vite.config.ts`：`build.outDir` 必须指向 `src/main/resources/static/`
+  之下——产物一旦离开 jar，前端就不再与 API 同源，第 2 点的保护随之失效
+- `frontend/src/api/client.ts`：请求必须始终带 `Content-Type: application/json`，
+  且不得改成绝对 URL 指向另一个源

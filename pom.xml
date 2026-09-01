@@ -21,6 +21,25 @@
     <java.version>21</java.version>
     <!-- 需求 13.3：MCP SDK 版本必须固定，不使用动态版本。 -->
     <mcp.sdk.version>2.0.1</mcp.sdk.version>
+
+    <!--
+      管理前端（frontend/）。同样按需求 13.3 固定版本：Node 版本写死在这里，
+      npm 依赖由 frontend/package-lock.json 锁定，构建走 `npm ci` 而不是 `npm install`。
+    -->
+    <node.version>v24.15.0</node.version>
+    <frontend-maven-plugin.version>1.15.1</frontend-maven-plugin.version>
+    <!--
+      跳过前端构建：`mvn -Dfrontend.skip=true verify`。
+      只在本地已经手工跑过 `npm run build` 时才用 —— 页面测试依赖
+      src/main/resources/static/app/ 下的产物，全新克隆上跳过会让它们失败。
+    -->
+    <frontend.skip>false</frontend.skip>
+    <!--
+      单独跳过前端测试。默认跟随 frontend.skip；`-DskipTests` 管不到这里
+      （Maven 的 skipTests 只对 surefire 生效），所以镜像构建那种确实不想跑测试的场景
+      要显式带上 `-Dfrontend.test.skip=true`。
+    -->
+    <frontend.test.skip>${frontend.skip}</frontend.test.skip>
   </properties>
 
   <dependencyManagement>
@@ -44,11 +63,11 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-jdbc</artifactId>
     </dependency>
-    <!-- 需求 14：Thymeleaf + Bootstrap，单体部署，不引入独立前端构建链。 -->
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-thymeleaf</artifactId>
-    </dependency>
+    <!--
+      需求 14 原本选的是 Thymeleaf 服务端渲染。管理前端迁到 Vue 之后已经没有任何模板，
+      依赖随之移除；"单体部署"这一条没有变 —— 前端产物打进同一个 jar，见
+      frontend-maven-plugin 那段的说明。
+    -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-validation</artifactId>
@@ -94,6 +113,78 @@
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+
+      <!--
+        管理前端的构建。产物落进 src/main/resources/static/app/，随后由
+        process-resources 拷进 jar —— 前端和后端仍然是**一个部署单元**。
+
+        为什么不做成独立部署：管理端没有登录、没有会话、没有 CSRF 令牌，
+        目前挡住跨站请求的只有"接口只收 application/json"和"没有任何 CORS
+        响应头"两点。独立部署必须放开 CORS，那层保护就没了
+        （见 SecurityInvariantsTest.noCorsIsEnabled）。开发期同源由 Vite 的
+        server.proxy 保证，见 frontend/vite.config.ts。
+
+        三个 execution 都绑在 generate-resources，早于 process-resources，
+        所以产物一定赶得上被拷进 target/classes。
+      -->
+      <plugin>
+        <groupId>com.github.eirslett</groupId>
+        <artifactId>frontend-maven-plugin</artifactId>
+        <version>${frontend-maven-plugin.version}</version>
+        <configuration>
+          <workingDirectory>frontend</workingDirectory>
+          <!-- Node 装在 target/ 下，`mvn clean` 能清干净，不污染工作区 -->
+          <installDirectory>target</installDirectory>
+          <skip>${frontend.skip}</skip>
+        </configuration>
+        <executions>
+          <execution>
+            <id>install-node-and-npm</id>
+            <goals>
+              <goal>install-node-and-npm</goal>
+            </goals>
+            <configuration>
+              <nodeVersion>${node.version}</nodeVersion>
+            </configuration>
+          </execution>
+          <execution>
+            <id>npm-ci</id>
+            <goals>
+              <goal>npm</goal>
+            </goals>
+            <configuration>
+              <!-- ci 而不是 install：严格按 package-lock.json 装，构建可复现 -->
+              <arguments>ci</arguments>
+            </configuration>
+          </execution>
+          <execution>
+            <id>npm-build</id>
+            <goals>
+              <goal>npm</goal>
+            </goals>
+            <configuration>
+              <!-- 含 vue-tsc 类型检查，类型不过就让构建失败 -->
+              <arguments>run build</arguments>
+            </configuration>
+          </execution>
+          <!--
+            前端测试跟 Java 测试跑在同一个 test 阶段。
+            需求 15.5 的覆盖率门禁只管 Java 字节码，视图逻辑搬到 Vue 之后
+            会掉出那道门禁 —— 这个 execution 就是补上的那道。
+          -->
+          <execution>
+            <id>npm-test</id>
+            <phase>test</phase>
+            <goals>
+              <goal>npm</goal>
+            </goals>
+            <configuration>
+              <arguments>run test</arguments>
+              <skip>${frontend.test.skip}</skip>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
       <plugin>
         <groupId>org.jacoco</groupId>

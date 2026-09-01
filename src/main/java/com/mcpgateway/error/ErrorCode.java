@@ -74,6 +74,9 @@ public enum ErrorCode {
     /** 子 MCP 不存在。 */
     DOWNSTREAM_NOT_FOUND(HttpStatus.NOT_FOUND),
 
+    /** 调用记录不存在，或不属于该网关（需求 FR-06.5 的查询接口）。 */
+    CALL_RECORD_NOT_FOUND(HttpStatus.NOT_FOUND),
+
     /** 网关访问令牌缺失或不正确（§4.3）。 */
     UNAUTHORIZED(HttpStatus.UNAUTHORIZED),
 

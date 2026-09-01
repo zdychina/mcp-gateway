@@ -2,12 +2,18 @@ package com.mcpgateway.repository;
 
 import com.mcpgateway.domain.CallStatus;
 import com.mcpgateway.domain.ToolCallRecord;
+import com.mcpgateway.domain.ToolCallSummary;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -125,6 +131,155 @@ public class ToolCallRecordRepository {
                 .param("callId", callId)
                 .query(ROW_MAPPER)
                 .optional();
+    }
+
+    // ------------------------------------------------------ 查询（需求 FR-06.5）
+
+    /**
+     * 列表投影用的列。
+     *
+     * 刻意不含 request_json / response_json —— 它们按 FR-06.4 原样保存且不截断，
+     * 装的是知识库返回的正文。列表一次几十条，把 CLOB 一起捞出来既拖垮响应体，
+     * 也把大量业务内容摊在一个没有登录的接口上。正文只能按 callId 单条取。
+     */
+    private static final String SUMMARY_COLUMNS = """
+            call_id, trace_id, gateway_id, downstream_mcp_id, exposed_tool_name, original_tool_name,
+            status, error_code, error_message, started_at, finished_at, duration_ms
+            """;
+
+    private static final RowMapper<ToolCallSummary> SUMMARY_MAPPER = (rs, rowNum) -> {
+        long rawDuration = rs.getLong("duration_ms");
+        Long durationMs = rs.wasNull() ? null : rawDuration;
+        return new ToolCallSummary(
+                rs.getString("call_id"),
+                rs.getString("trace_id"),
+                rs.getString("gateway_id"),
+                rs.getString("downstream_mcp_id"),
+                rs.getString("exposed_tool_name"),
+                rs.getString("original_tool_name"),
+                CallStatus.valueOf(rs.getString("status")),
+                rs.getString("error_code"),
+                rs.getString("error_message"),
+                Timestamps.fromDb(rs, "started_at"),
+                Timestamps.fromDb(rs, "finished_at"),
+                durationMs);
+    };
+
+    /**
+     * 一次列表查询的条件。
+     *
+     * gatewayId 是必填且永远参与过滤 —— 调用记录按网关隔离，不允许跨网关查询。
+     */
+    public record CallRecordQuery(
+            String gatewayId,
+            String downstreamMcpId,
+            String toolName,
+            CallStatus status,
+            String traceId,
+            Instant from,
+            Instant to,
+            int offset,
+            int limit) {
+    }
+
+    /**
+     * 按条件分页查询，最近的在前。
+     *
+     * 排序带上 call_id 做次级键：同一毫秒内可能有多条记录，只按 started_at 排序时
+     * 它们的相对顺序不确定，翻页会看到重复或漏掉的行。
+     */
+    public List<ToolCallSummary> search(CallRecordQuery query) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        String where = whereClause(query, params, true);
+        params.put("limit", query.limit());
+        params.put("offset", query.offset());
+
+        return this.jdbcClient.sql("""
+                SELECT %s FROM tool_call_record
+                %s
+                 ORDER BY started_at DESC, call_id DESC
+                 LIMIT :limit OFFSET :offset
+                """.formatted(SUMMARY_COLUMNS, where))
+                .params(params)
+                .query(SUMMARY_MAPPER)
+                .list();
+    }
+
+    /** 满足条件的总条数，供分页使用。 */
+    public int count(CallRecordQuery query) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        String where = whereClause(query, params, true);
+
+        Integer total = this.jdbcClient
+                .sql("SELECT COUNT(*) FROM tool_call_record\n" + where)
+                .params(params)
+                .query(Integer.class)
+                .single();
+        return total == null ? 0 : total;
+    }
+
+    /**
+     * 各终态的条数分布。
+     *
+     * 刻意**不**套用 status 这个条件：这是给界面做分面筛选用的，
+     * 已经筛了 ERROR 还只显示 ERROR 的数量就没有意义了。其余条件照常生效。
+     */
+    public Map<CallStatus, Integer> countByStatus(CallRecordQuery query) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        String where = whereClause(query, params, false);
+
+        Map<CallStatus, Integer> counts = new EnumMap<>(CallStatus.class);
+        this.jdbcClient.sql("SELECT status, COUNT(*) AS total FROM tool_call_record\n"
+                        + where + "\n GROUP BY status")
+                .params(params)
+                .query((rs, rowNum) ->
+                        counts.put(CallStatus.valueOf(rs.getString("status")), rs.getInt("total")))
+                .list();
+        return counts;
+    }
+
+    /**
+     * 拼 WHERE 子句。
+     *
+     * 只有列名是拼进 SQL 的字面量，所有用户输入一律走命名参数 —— 这里绝不能改成
+     * 字符串拼接，那就是一个注入点。
+     *
+     * @param includeStatus 是否把 status 条件算进去，见 {@link #countByStatus}
+     */
+    private static String whereClause(CallRecordQuery query, Map<String, Object> params,
+            boolean includeStatus) {
+        List<String> conditions = new ArrayList<>();
+
+        conditions.add("gateway_id = :gatewayId");
+        params.put("gatewayId", query.gatewayId());
+
+        if (query.downstreamMcpId() != null) {
+            conditions.add("downstream_mcp_id = :downstreamMcpId");
+            params.put("downstreamMcpId", query.downstreamMcpId());
+        }
+        if (query.toolName() != null && !query.toolName().isBlank()) {
+            // 工具名做包含匹配，方便按子 MCP 前缀（kb_a__）一次筛出一组
+            conditions.add("LOWER(exposed_tool_name) LIKE :toolName");
+            params.put("toolName", "%" + query.toolName().trim().toLowerCase(Locale.ROOT) + "%");
+        }
+        if (includeStatus && query.status() != null) {
+            conditions.add("status = :status");
+            params.put("status", query.status().name());
+        }
+        if (query.traceId() != null && !query.traceId().isBlank()) {
+            conditions.add("trace_id = :traceId");
+            params.put("traceId", query.traceId().trim());
+        }
+        if (query.from() != null) {
+            conditions.add("started_at >= :from");
+            params.put("from", Timestamps.toDb(query.from()));
+        }
+        if (query.to() != null) {
+            conditions.add("started_at < :to");
+            params.put("to", Timestamps.toDb(query.to()));
+        }
+
+        return " WHERE " + String.join("\n   AND ", conditions);
     }
 
     /** 需求 15.4.3：记录可以通过 call_id 和 trace_id 唯一关联。 */

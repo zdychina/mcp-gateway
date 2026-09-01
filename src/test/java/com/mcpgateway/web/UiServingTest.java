@@ -12,13 +12,18 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * 在真实 Tomcat 下验证页面与静态资源的响应头。
  *
  * 为什么不放在 MockMvc 测试里：MockHttpServletResponse 对 charset 的处理和真实容器不一致，
- * 在那边断言 charset 会得出与线上相反的结论。页面文案和脚本里都有中文，这条必须按容器行为验。
+ * 在那边断言 charset 会得出与线上相反的结论。界面文案里全是中文，这条必须按容器行为验。
  *
  * 注解与 AgentEndToEndTest 保持一致，好让 Spring 复用同一个测试上下文。
  */
@@ -48,42 +53,61 @@ class UiServingTest {
     @Test
     @DisplayName("页面以 UTF-8 返回，中文文案不会乱码")
     void pagesAreServedAsUtf8() {
+        // 页面是 Vue 应用的入口文档（转发自 /app/index.html），壳里仍有中文（<title>）
         ResponseEntity<String> response = fetch("/ui/gateways");
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getHeaders().getContentType()).isNotNull();
         assertThat(response.getHeaders().getContentType().toString()).containsIgnoringCase("charset=UTF-8");
-        assertThat(response.getBody()).contains("网关列表").contains("创建网关");
+        assertThat(response.getBody()).contains("MCP 聚合网关").contains("id=\"app\"");
     }
 
     @Test
-    @DisplayName("脚本以 UTF-8 返回 —— 里面有中文提示文案，靠浏览器猜编码不可接受")
+    @DisplayName("脚本以 UTF-8 返回 —— 界面文案全在包里，靠浏览器猜编码不可接受")
     void scriptIsServedAsUtf8() {
-        ResponseEntity<String> response = fetch("/js/app.js");
+        String script = scriptPath();
+        ResponseEntity<String> response = fetch(script);
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getHeaders().getContentType().toString()).containsIgnoringCase("charset=UTF-8");
+        // 包里确实有中文文案，说明编码断言不是在验一个纯 ASCII 文件
         assertThat(response.getBody()).contains("处理中").contains("mcp-servers");
     }
 
     @Test
-    @DisplayName("需求 14：Bootstrap 随应用一起提供，内网无外网时界面照常可用")
-    void bootstrapIsVendoredLocally() {
-        ResponseEntity<String> response = fetch("/css/bootstrap.min.css");
+    @DisplayName("需求 14：前端资源随应用一起提供，内网无外网时界面照常可用")
+    void frontendAssetsAreVendoredLocally() {
+        String shell = fetch("/ui/gateways").getBody();
 
-        assertThat(response.getStatusCode().value()).isEqualTo(200);
-        assertThat(response.getBody()).contains("Bootstrap");
+        /*
+         * 前端做成同源而不是独立部署，是因为管理端没有登录也没有 CSRF 令牌 ——
+         * 独立部署必须放开 CORS，而"没有任何 CORS 响应头"正是目前仅有的两道
+         * 跨站保护之一（另一道是接口只收 application/json）。
+         * 这里守住的是它的前提：入口文档引用的资源必须全是同源相对路径。
+         */
+        assertThat(shell).contains("/app/assets/");
+        assertThat(shell).doesNotContain("//localhost:").doesNotContain("//127.0.0.1:");
 
-        // 页面里不能出现任何指向外网的资源引用
-        String page = fetch("/ui/gateways").getBody();
-        assertThat(page).doesNotContain("http://cdn").doesNotContain("https://cdn")
-                .doesNotContain("unpkg.com").doesNotContain("jsdelivr");
+        List<String> assets = assetPathsIn(shell);
+        for (String asset : assets) {
+            assertThat(fetch(asset).getStatusCode().value())
+                    .as("静态资源 %s", asset).isEqualTo(200);
+        }
+
+        // 页面和脚本里都不能出现指向外网的资源引用
+        String script = fetch(scriptPath()).getBody();
+        for (String page : new String[] { shell, script }) {
+            assertThat(page).doesNotContain("http://cdn").doesNotContain("https://cdn")
+                    .doesNotContain("unpkg.com").doesNotContain("jsdelivr")
+                    .doesNotContain("fonts.googleapis.com");
+        }
     }
 
     @Test
     @DisplayName("根路径跟随重定向后落在网关列表页")
     void rootLandsOnTheGatewayList() {
-        assertThat(fetch("/").getBody()).contains("网关列表");
+        // 列表页是 Vue 应用的空壳，内容由前端调 /api/gateways 填充
+        assertThat(fetch("/").getBody()).contains("id=\"app\"");
     }
 
     @Test
@@ -93,5 +117,24 @@ class UiServingTest {
         assertThat(fetch("/actuator/env").getStatusCode().value()).isEqualTo(404);
         assertThat(fetch("/actuator/beans").getStatusCode().value()).isEqualTo(404);
         assertThat(fetch("/actuator/configprops").getStatusCode().value()).isEqualTo(404);
+    }
+
+    /** 入口文档里那个带 hash 的脚本路径。 */
+    private String scriptPath() {
+        return assetPathsIn(fetch("/ui/gateways").getBody()).stream()
+                .filter(path -> path.endsWith(".js"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("入口文档里没有找到脚本引用"));
+    }
+
+    /** 从入口文档里抠出 /app/assets/... 的引用。 */
+    private static List<String> assetPathsIn(String html) {
+        Matcher matcher = Pattern.compile("/app/assets/[A-Za-z0-9._-]+").matcher(html);
+        List<String> paths = new ArrayList<>();
+        while (matcher.find()) {
+            paths.add(matcher.group());
+        }
+        assertThat(paths).as("入口文档里的资源引用").isNotEmpty();
+        return paths;
     }
 }

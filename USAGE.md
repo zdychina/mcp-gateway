@@ -45,12 +45,13 @@
 - 工具目录同步到本地快照，可以按工具启停、可以覆盖工具描述
 - 每次 `tools/call` 落一条完整调用记录（入参、出参、耗时、状态、trace_id）
 - 一个 Web 管理界面，不需要写配置文件
+- 调用记录可以在界面上按工具、子 MCP、状态、trace_id 和时间范围查，展开看入参与返回
 
 **不能做的**（MVP 明确的边界）
 
 - 只支持 `streamable-http` 传输的下游，**不支持 stdio**（`command`/`args`/`env` 会被明确拒绝）
 - 管理端**没有登录、没有权限系统**，靠网络边界保护
-- 不提供调用记录的查询接口或页面，排障直接查库
+- 调用记录**没有清理或归档策略**，只在删除网关时级联删除，长期运行会持续增长
 - 令牌轮换没有过渡期，轮换即刻断连
 
 ---
@@ -97,9 +98,10 @@ java -jar target/mcp-gateway-0.1.0-SNAPSHOT.jar
 
 启动后浏览器打开 <http://127.0.0.1:8080/>，会跳到网关列表页。
 
-> **注意**：当前 `src/main/resources/application.yml` 第 45 行给 `master-key` 留了一个**兜底默认值**，
-> 所以不设环境变量也能启动。这与需求 12.1 和 `SecurityInvariantsTest` 的断言冲突，
-> 详见 [§11.4](#114-applicationyml-里的主密钥默认值)。任何非本机试玩的场景都必须显式设置该环境变量。
+> **`MCP_GATEWAY_MASTER_KEY` 没有兜底默认值，不设就启动不来。** 这是刻意的（需求 12.1 / 12.2）：
+> 有兜底值就意味着仓库里躺着一把公开的密钥，子 MCP 凭证用它加密等同于明文落库。
+> `SecurityInvariantsTest.noHardcodedSecrets` 会在构建期断言
+> `application.yml` 里这一行就是 `master-key: ${MCP_GATEWAY_MASTER_KEY:}`。
 
 ### 2.4 建一个网关
 
@@ -287,8 +289,13 @@ Agent 在 `tools/list` 里看到的就是这个值。清除自定义描述会回
 ### 4.1 列表页 `/ui/gateways`
 
 显示每个网关的名称、slug、状态、子 MCP 数量、工具数量、更新时间；可以新建和删除网关。
+顶部有搜索框，按名称、slug 或描述过滤。
 
-**创建网关后不会自动跳转** —— 跳转会把只显示一次的令牌冲掉。请先复制令牌，再点进详情页。
+更新时间显示成相对时间（「3 分钟前」），鼠标悬停可看绝对时间。时间按**浏览器本地时区**
+换算，不再跟着服务端的 JVM 时区走。
+
+**创建网关后令牌会当场显示，直到你点「我已保存，关闭」为止。** 页面不会刷新，
+所以不用担心令牌被冲掉 —— 但它确实只显示这一次，关掉之后只能靠轮换重新生成。
 
 ### 4.2 详情页 `/ui/gateways/{id}`
 
@@ -301,15 +308,48 @@ Agent 在 `tools/list` 里看到的就是这个值。清除自定义描述会回
 
 编辑子 MCP 时页面显示的 headers 是遮罩值 `******`。**必须先勾「替换 headers」** 才会提交这个字段；不勾则不提交，服务端保持原有凭证不变。把遮罩值原样提交回去会把真凭证覆盖掉。
 
+「测试并同步」失败时页面给的是**警告**而不是错误，并会写明"已保留上一次成功的工具快照"——
+同步失败不会让工具消失（需求 6.4.7）。导入时同理：配置一定整批落库，同步则逐个成败，
+页面会把两件事分开说。
+
 **聚合工具** —— 按子 MCP 分组，逐个启停、覆盖描述。启停立即生效，不需要重启或重新同步。
+停用的工具整行会压暗。描述留空保存表示清除自定义描述、回退到下游的原始描述。
 
-**Agent 接入** —— 复制接入 JSON；轮换令牌（新令牌在此当场显示一次，旧令牌立即失效）。
+**Agent 接入** —— 复制 MCP 地址和接入 JSON；轮换令牌（新令牌在此当场显示一次，旧令牌立即失效）。
 
-### 4.3 界面的几处刻意取舍
+### 4.3 调用记录页 `/ui/gateways/{id}/calls`
 
-- Bootstrap 落在本地 `static/css/bootstrap.min.css`，不用 CDN —— 内网部署没外网时 CDN 会让界面直接不可用
-- 没引 Bootstrap JS，确认框用原生 `confirm`
-- 所有提示文案用 `textContent` 写入，不拼 HTML —— 错误信息里可能带下游返回的内容
+从详情页右上角「查看调用记录」进去。
+
+- 顶部**状态分面**给出各终态的条数，点一下就切换筛选，再点一次取消。
+  这些数字**不受当前状态筛选影响**，所以可以直接拿来在 `SUCCESS` / `ERROR` 之间跳
+- 可按聚合工具名（包含匹配，`kb_a__` 能筛出一整个子 MCP）、子 MCP、`trace_id` 和时间范围筛
+- 点某一行**展开**看这次调用的入参和返回；列表本身不带正文，展开时才按 `callId` 取
+- 点 `trace_id` 直接按那条链路筛（需求 15.4.3）
+- 时间用本地时区显示，鼠标悬停看绝对时间
+
+`STARTED` 的记录要么是正在进行，要么是上次进程异常退出遗留的 —— 后者会在下次启动时
+被自动改成 `ERROR`。
+
+**这个页面会显示子 MCP 返回的原始内容**，和数据库文件一样需要按部署要求保护。
+
+### 4.4 界面的几处刻意取舍
+
+- **不引用任何外网资源** —— 内网部署没外网时 CDN 会让界面直接不可用。样式和脚本
+  全部随 jar 发布，`UiServingTest` 会在构建期验这一条
+- **提示文案一律走文本插值，不拼 HTML** —— 错误信息里可能带下游返回的内容
+- **变更后不整页刷新**，提示框会留到你自己关掉（成功提示 6 秒后自动消失）。
+  这也意味着令牌显示出来之后不会被任何操作冲掉
+- 确认框还是原生 `confirm`，等选定 UI 组件库后再换
+
+### 4.5 前端实现
+
+管理界面是 Vue 单页应用（`frontend/`），服务端只把 `/ui/**` 转发给它的入口文档，
+数据全部走 `/api` 下的管理接口。直接访问、刷新、后退都能落到正确的页面上。
+
+前端产物与后端**同源**打进同一个 jar，不做独立部署 —— 管理端没有登录，
+独立部署必须放开的 CORS 会拆掉目前仅有的跨站保护。详见
+[README 的管理界面一节](README.md#管理界面)。
 
 ---
 
@@ -461,6 +501,68 @@ curl http://127.0.0.1:8080/api/gateways
 
 响应是更新后的 `GatewayToolResponse`，含 `effectiveDescription`。改动**立即生效**，Agent 下次 `tools/list` 就能看到。
 
+### 5.4 调用记录
+
+#### `GET /api/gateways/{id}/call-records` — 分页列表
+
+所有查询参数都可省略。最近的在前。
+
+| 参数 | 说明 |
+| --- | --- |
+| `toolName` | 聚合工具名，**包含匹配**，大小写不敏感。用 `kb_a__` 可一次筛出某个子 MCP 的全部工具 |
+| `downstreamMcpId` | 子 MCP，精确匹配 |
+| `status` | `STARTED` / `SUCCESS` / `ERROR` / `TIMEOUT`，大小写不敏感 |
+| `traceId` | 精确匹配（需求 15.4.3 的链路关联） |
+| `from` | 起始时间，ISO-8601 instant，**含** |
+| `to` | 结束时间，ISO-8601 instant，**不含** |
+| `page` | 页码，从 0 开始，默认 0 |
+| `size` | 每页条数，默认 20，**上限 100**（超了收敛到 100，响应里的 `size` 说明实际用了多少） |
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "callId": "9f2c...", "traceId": "4bf92f...",
+        "downstreamMcpId": "7a1e...", "exposedToolName": "kb_a__search",
+        "originalToolName": "search", "status": "SUCCESS",
+        "errorCode": null, "errorMessage": null,
+        "startedAt": "2026-08-31T09:00:00Z", "finishedAt": "2026-08-31T09:00:00.120Z",
+        "durationMs": 120
+      }
+    ],
+    "page": 0, "size": 20, "total": 137,
+    "statusCounts": { "SUCCESS": 120, "ERROR": 15, "TIMEOUT": 2 }
+  },
+  "error": null
+}
+```
+
+两点必须知道：
+
+- **列表不含 `requestJson` / `responseJson`。** 那两个字段各可能接近 1 MiB，装的是子 MCP
+  返回的正文；一次几十条带上它们，等于在一个没有登录的接口上成批摊开业务内容。
+  要看正文只能按 `callId` 取单条。
+- **`statusCounts` 不套用 `status` 参数**，其余筛选条件照常生效。它是给界面做分面切换用的 ——
+  已经筛了 `ERROR` 还只显示 `ERROR` 的数量，就没法拿它跳到别的状态。
+
+非法的 `status`、`from`、`to`、负数 `page` 一律返回 `INVALID_REQUEST`，**不静默忽略** ——
+静默忽略会让你以为"筛出来就这些"，而实际上根本没筛。
+
+#### `GET /api/gateways/{id}/call-records/{callId}` — 单条完整内容
+
+比列表多 `gatewayId`、`requestJson`、`responseJson` 三个字段。两个 JSON 以**字符串**返回，
+不在服务端解析 —— 库里可能是打点时序列化失败写下的占位符 `{"_unserializable":true}`，
+解析失败不该让整条记录取不出来。
+
+记录**按网关隔离**：拿别的网关的 `callId` 来查，返回和"不存在"完全一致的
+`CALL_RECORD_NOT_FOUND`，不会透露"它存在但属于别人"。
+
+> 这是整个管理 API 里唯一会返回知识库正文的接口，而管理端没有登录 ——
+> 它的暴露面等同于数据库文件本身，见 [SECURITY.md](SECURITY.md)。
+> 反过来，记录里**不会**有凭证（需求 FR-06.3）。
+
 ---
 
 ## 6. Agent 接入
@@ -530,7 +632,7 @@ JSON-RPC `code` 映射：`TOOL_NOT_FOUND` / `TOOL_DISABLED` / `INVALID_TOOL_ARGU
 
 | 变量 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `MCP_GATEWAY_MASTER_KEY` | **是** | 见 §11.4 | Base64 编码的 32 字节 AES 主密钥。不是合法 Base64 或长度不对时**启动失败** |
+| `MCP_GATEWAY_MASTER_KEY` | **是** | 无 | Base64 编码的 32 字节 AES 主密钥。缺失、不是合法 Base64 或长度不对时**启动失败** |
 | `MCP_GATEWAY_BASE_URL` | 建议 | `http://127.0.0.1:8080` | 接入 JSON 里的地址。必须是 **Agent 实际能访问到**的地址 |
 | `MCP_GATEWAY_BIND_ADDRESS` | 否 | `127.0.0.1` | 管理端无登录，默认只监听 localhost |
 | `MCP_GATEWAY_PORT` | 否 | `8080` | |
@@ -624,25 +726,46 @@ curl http://127.0.0.1:8080/actuator/health
 
 ### 9.2 查调用记录
 
-MVP 不提供查询接口和页面，直接查库。停掉应用后用 H2 console 或 `h2` jar 连 `./data/mcp-gateway.mv.db`：
+**界面**：网关详情页右上角「查看调用记录」，或直接开 `/ui/gateways/{id}/calls`。
+顶部的状态分面可以一键切到 `ERROR` / `TIMEOUT`；点某一行展开看入参和返回；
+点 `trace_id` 按那条链路筛。
+
+**命令行**：
+
+```bash
+# 最近 20 次
+curl 'http://127.0.0.1:8080/api/gateways/<网关ID>/call-records'
+
+# 只看失败的
+curl 'http://127.0.0.1:8080/api/gateways/<网关ID>/call-records?status=ERROR'
+
+# 按子 MCP 前缀筛一组工具（toolName 是包含匹配）
+curl 'http://127.0.0.1:8080/api/gateways/<网关ID>/call-records?toolName=kb_a__'
+
+# 按链路关联（需求 15.4.3）
+curl 'http://127.0.0.1:8080/api/gateways/<网关ID>/call-records?traceId=<trace-id>'
+
+# 时间范围，ISO-8601 instant，from 含、to 不含
+curl 'http://127.0.0.1:8080/api/gateways/<网关ID>/call-records?from=2026-08-31T00:00:00Z'
+
+# 单条完整内容（含入参和返回正文）
+curl 'http://127.0.0.1:8080/api/gateways/<网关ID>/call-records/<callId>'
+```
+
+**列表接口不返回入参和返回正文** —— 那两个字段各可能接近 1 MiB，装的是知识库内容，
+只能按 `callId` 一条一条取。响应里的 `statusCounts` 是各终态的分布，**不受 `status` 参数影响**，
+所以可以拿它做分面切换。
+
+**仍需要直接查库的场景**：跨网关的全局统计（接口按网关隔离），或者要做批量清理。
+停掉应用后用 H2 console 或 `h2` jar 连 `./data/mcp-gateway.mv.db`：
 
 ```sql
--- 最近 50 次调用
-SELECT started_at, exposed_tool_name, status, duration_ms, error_code
-FROM tool_call_record
-WHERE gateway_id = '<网关ID>'
-ORDER BY started_at DESC
-LIMIT 50;
+-- 跨网关的失败分布
+SELECT gateway_id, error_code, COUNT(*) FROM tool_call_record
+WHERE status <> 'SUCCESS' GROUP BY gateway_id, error_code ORDER BY 3 DESC;
 
--- 按 trace_id 关联一次链路
-SELECT * FROM tool_call_record WHERE trace_id = '<trace-id>';
-
--- 失败分布
-SELECT error_code, COUNT(*) FROM tool_call_record
-WHERE status <> 'SUCCESS' GROUP BY error_code ORDER BY 2 DESC;
-
--- 仍是 STARTED 的（正在进行中，或进程异常退出的遗留）
-SELECT * FROM tool_call_record WHERE status = 'STARTED';
+-- 库被撑大时按时间清理（目前没有内置的保留策略）
+DELETE FROM tool_call_record WHERE started_at < '2026-06-01';
 ```
 
 字段要点：
@@ -743,40 +866,87 @@ java -jar app.jar --logging.level.com.mcpgateway=DEBUG
 ### 11.3 其他限制
 
 - **令牌轮换没有过渡期** —— 数据模型只有一个哈希，平滑轮换需要改表结构
-- **调用记录含知识库内容** —— `request_json` / `response_json` 原样保存，不截断；MVP 无清理策略
+- **调用记录含知识库内容** —— `request_json` / `response_json` 原样保存不截断。
+  查询接口和页面已经有了，但**没有任何清理或归档策略**：记录只在删除网关时级联删除，
+  长期运行会持续把库撑大，保留期需要自行处理
 - **不跟随 HTTP 重定向** —— 比需求更保守，避免一个 302 把请求连同凭证带去未经校验的主机
-- **无调用记录查询接口** —— 直接查库
 - **单机单进程** —— H2 文件库，不支持多实例
-
-### 11.4 application.yml 里的主密钥默认值
-
-当前 `src/main/resources/application.yml:45`：
-
-```yaml
-master-key: ${MCP_GATEWAY_MASTER_KEY:sOiOfl0AOhByOjOadX0NHmHco7mylqE//4PBFmyeILA=}
-```
-
-这个 fallback 值与需求 12.1（禁止硬编码加密密钥）以及 `SecurityInvariantsTest`
-（断言这一行是 `master-key: ${MCP_GATEWAY_MASTER_KEY:}`）冲突，`mvn verify` 会因此失败。
-
-后果：不设 `MCP_GATEWAY_MASTER_KEY` 也能启动，子 MCP 凭证会用这把**公开在源码里**的密钥加密，
-安全性等同于明文。**部署前必须把这一行改回 `${MCP_GATEWAY_MASTER_KEY:}` 并通过环境变量提供真密钥。**
 
 ---
 
 ## 12. 开发与测试
 
 ```bash
-mvn verify          # 全部测试 + 覆盖率门禁 + 依赖版本检查
+mvn verify          # 前端构建 + 全部测试 + 覆盖率门禁 + 依赖版本检查
 mvn spring-boot:run # 本地启动
-mvn -DskipTests package
+mvn -DskipTests -Dfrontend.test.skip=true package
 ```
 
-`mvn verify` 的三道门禁：
+`mvn verify` 的四道门禁：
 
 - `maven-enforcer-plugin` —— Java 21+、Maven 3.9+、禁止 SNAPSHOT 依赖、禁止重复依赖声明
 - `jacoco:check` —— 指令覆盖率 ≥ 80%、分支覆盖率 ≥ 70%
 - `SecurityInvariantsTest` —— 扫描硬编码密钥、CORS 放开、未遮罩的 header 日志
+- `npm run test` —— 前端 Vitest 用例。JaCoCo 只看 Java 字节码，视图逻辑迁到 Vue 之后
+  就掉出了那道门禁，这一道是补上的
+
+### 前端构建
+
+管理前端在 `frontend/`（Vite + Vue 3 + TypeScript），产物写进
+`src/main/resources/static/app/` 后随 jar 一起发布 —— **前后端是一个部署单元**，
+不做独立部署，理由见 [README 的管理界面一节](README.md#管理界面)。
+
+`frontend-maven-plugin` 会按 `pom.xml` 里固定的 `node.version` 自己下载一份 Node
+到 `target/` 下，宿主机不用预装。但**首次构建需要能访问 nodejs.org 和 npm registry**，
+完全离线的环境要预置镜像源。
+
+只改前端时不必走 Maven：
+
+```bash
+cd frontend
+npm run dev     # :5173，/api 通过 proxy 转给 :8080（需要另起 mvn spring-boot:run）
+npm run test
+npm run build   # 产物写进 src/main/resources/static/app/
+```
+
+跳过前端：
+
+| 参数 | 效果 |
+| --- | --- |
+| `-Dfrontend.skip=true` | 跳过 Node 安装、`npm ci`、前端构建和前端测试 |
+| `-Dfrontend.test.skip=true` | 只跳过前端测试 |
+
+注意 `-DskipTests` **管不到前端** —— 那是 surefire 的参数。两个都要跳就都得给，
+Dockerfile 里就是这么写的。
+
+另外：页面测试依赖 `src/main/resources/static/app/` 下的产物（`/ui/gateways` 转发到那里）。
+全新克隆上带 `-Dfrontend.skip=true` 会让它们失败，因为产物根本还没生成过。
+
+> **Windows 上先用 Ctrl+C 正常关掉 dev server，再跑 `mvn verify`。**
+>
+> `npm run dev` 会拉起 vite 和常驻的 `esbuild.exe` 两个子进程，vite 进程还加载着
+> rollup 的原生模块 `rollup.win32-x64-msvc.node`。dev server 被**强杀**（关掉终端、
+> 杀父进程）时这些子进程会变成孤儿继续活着，攥着文件不放；而 `npm ci` 要先删掉整个
+> `node_modules`，于是失败：
+>
+> ```
+> npm error code EPERM
+> npm error syscall unlink
+> npm error path ...\node_modules\@rollup\rollup-win32-x64-msvc\rollup.win32-x64-msvc.node
+> frontend-maven-plugin ... Process exited with an error: -4048
+> ```
+>
+> `-4048` 就是 Windows 的 EPERM。被锁的具体文件每次可能不同（`esbuild.exe` 或某个
+> `.node`），但成因是同一个。清掉残留进程即可：
+>
+> ```powershell
+> Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='esbuild.exe'" |
+>   Where-Object { $_.CommandLine -like '*mcp-gateway*frontend*' } |
+>   ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+> ```
+>
+> 另一个同类现象是首次 `npm install` 报 `EBUSY`（杀软或索引器锁住刚写下的
+> `esbuild.exe`），重试一次通常就过了。
 
 依赖漏洞扫描单独放在 profile 里，**发布前必须跑一次**：
 
@@ -802,7 +972,8 @@ mvn -Psecurity verify -Dnvd.api.key=<你的 NVD API Key>
 | `downstream` | 下游 MCP 客户端、工具同步与快照合并、下游错误码映射 |
 | `mcpserver` | 对 Agent 暴露的 MCP 端点：slug 分发、令牌与 Origin 校验、`tools/list` 与 `tools/call` 路由 |
 | `recording` | 调用打点：两阶段写入、脱敏、指标 |
-| `web` | 管理前端页面入口（Thymeleaf 服务端渲染） |
+| `service.CallRecordService` | 调用记录查询：按网关隔离、分页、状态分面（需求 FR-06.5） |
+| `web` | 管理前端入口路由（把 /ui/** 转发给 SPA 空壳）；界面本身在 `frontend/` |
 
 ### 改动时的复核点
 

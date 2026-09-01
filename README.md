@@ -11,10 +11,14 @@
 ```
 gateway/
   src/main/java/com/mcpgateway/     应用代码
-  src/main/resources/               配置、Flyway 迁移、前端模板与静态资源
+  src/main/resources/               配置、Flyway 迁移、前端产物与静态资源
   src/test/java/                    单元与验收测试
+  frontend/                         管理前端（Vite + Vue 3 + TypeScript）
   Dockerfile / docker-compose.yml   容器化部署
 ```
+
+管理前端是 Vue 单页应用，产物由 Vite 打进 `src/main/resources/static/app/`，随 jar 一起发布。
+取舍见下面的[管理界面](#管理界面)一节。
 
 > 仓库路径必须保持纯 ASCII。在 `sun.jnu.encoding=GBK` 的 Windows 上，含中文的绝对路径
 > 会在传给 forked JVM 的命令行参数里被破坏（JaCoCo 的 `-javaagent` destfile 首当其冲），
@@ -50,15 +54,41 @@ PowerShell 下：
 ## 构建与测试
 
 ```bash
-mvn verify        # 全部测试 + 覆盖率门禁 + 依赖版本检查
+mvn verify        # 前端构建 + 全部测试 + 覆盖率门禁 + 依赖版本检查
 mvn spring-boot:run
 ```
 
-`mvn verify` 会执行三道门禁：
+`mvn verify` 会执行四道门禁：
 
 - `maven-enforcer-plugin`：Java 21+、禁止 SNAPSHOT 依赖（需求 13.3）
 - `jacoco:check`：指令覆盖率 ≥ 80%、分支覆盖率 ≥ 70%（需求 15.5）
 - `SecurityInvariantsTest`：扫描硬编码密钥、CORS 放开、未遮罩的 header 日志等
+- `npm run test`：前端的 Vitest 用例。视图逻辑搬到 Vue 之后就掉出了 JaCoCo 的
+  覆盖范围（那道门禁只看 Java 字节码），这一道是补上的
+
+**构建需要 Node。** `frontend-maven-plugin` 会按 `pom.xml` 里固定的 `node.version`
+自动下载一份 Node 到 `target/` 下，不用宿主机预装，但**首次构建需要能访问
+nodejs.org 和 npm registry**。完全离线的环境要预置镜像源。
+
+前端可以单独跳过：
+
+```bash
+mvn -Dfrontend.skip=true verify        # 复用上次构建好的前端产物
+mvn -Dfrontend.test.skip=true verify   # 只跳过前端测试
+```
+
+`-DskipTests` **管不到前端** —— 那是 surefire 的参数。镜像构建里两个都给了。
+
+只改前端时不必走 Maven：
+
+```bash
+cd frontend
+npm run dev     # 开发服务器，:5173，API 通过 proxy 转给 :8080
+npm run test
+npm run build   # 产物写进 src/main/resources/static/app/
+```
+
+`npm run dev` 之外还要另起一个 `mvn spring-boot:run` —— 前端只代理 API，不自带后端。
 
 依赖漏洞扫描单独放在 profile 里，**发布前必须跑一次**：
 
@@ -102,7 +132,7 @@ docker compose up -d --build
 | `downstream` | 下游 MCP 客户端、工具同步与快照合并、下游错误码映射 |
 | `mcpserver` | 对 Agent 暴露的 MCP 端点：slug 分发、令牌与 Origin 校验、tools/list 与 tools/call 路由 |
 | `recording` | 调用打点：两阶段写入、脱敏、指标 |
-| `web` | 管理前端的页面入口（Thymeleaf 服务端渲染） |
+| `web` | 管理前端的入口路由（把 /ui/** 转发给 SPA 空壳） |
 | `api.dto` | 管理 API 的请求与响应模型 |
 
 ## 管理 API
@@ -121,6 +151,8 @@ docker compose up -d --build
 | `POST` | `/api/gateways/{id}/access-token/rotate` | 已实现 |
 | `POST` | `/api/gateways/{id}/mcp-servers/{serverId}/sync` | 已实现，失败也返回 200，细节在 body |
 | `PATCH` | `/api/gateways/{id}/tools/{toolId}` | 已实现，PATCH 语义 |
+| `GET` | `/api/gateways/{id}/call-records` | 已实现，分页与筛选 |
+| `GET` | `/api/gateways/{id}/call-records/{callId}` | 已实现，含入参与返回正文 |
 
 两处 PATCH 语义需要注意：
 
@@ -130,26 +162,59 @@ docker compose up -d --build
 
 ## 管理界面
 
-浏览器打开 `{baseUrl}/` 即可，会跳到网关列表页。两个页面对应需求 §10：
+浏览器打开 `{baseUrl}/` 即可，会跳到网关列表页。前两个页面对应需求 §10，第三个是 FR-06.5 的查询界面：
 
 - **列表页** `/ui/gateways`：名称、slug、状态、子 MCP 数量、工具数量、更新时间，以及创建和删除。
 - **详情页** `/ui/gateways/{id}`：基本信息 / 子 MCP 配置 / 聚合工具 / Agent 接入 四段。
+- **调用记录页** `/ui/gateways/{id}/calls`：按工具、子 MCP、状态、trace_id 和时间筛选，展开看入参与返回。
 
-实现方式：页面由 Thymeleaf 服务端渲染，所有变更走已有的 REST API，前端 JS 只负责发请求、
-显示反馈和刷新。视图模型只有服务端那一份，不在浏览器里重复实现一遍。
+### 实现方式：Vite + Vue 3 + TypeScript
 
-几处刻意的取舍：
+前端在 `frontend/`，三个页面同属一个 Vue 单页应用：
 
-- **Bootstrap 落在本地**（`static/css/bootstrap.min.css`），不用 CDN。部署环境可能是没有外网的
-  内网，CDN 会让界面直接不可用。也没引 Bootstrap JS —— 确认框用原生 `confirm`，省掉一个依赖。
+| 页面 | 组件 |
+| --- | --- |
+| 列表页 `/ui/gateways` | `frontend/src/views/GatewayListView.vue` |
+| 详情页 `/ui/gateways/{id}` | `frontend/src/views/GatewayDetailView.vue` |
+| 调用记录页 `/ui/gateways/{id}/calls` | `frontend/src/views/CallRecordsView.vue` |
+
+服务端只把 `/ui/**` 转发到 SPA 的入口文档（`GatewayPageController`），所有数据走 `/api` 下的
+管理接口。Thymeleaf 已经完全移除，模板、`app.js` 和本地 Bootstrap 一并删掉。
+
+**产物同源打进 jar，不做独立部署。** 这是整个迁移最关键的一条约束，理由是安全而不是省事：
+
+管理端没有登录、没有会话、没有 CSRF 令牌。目前挡住跨站请求的只有两点 —— 接口只收
+`application/json`，以及**一个 CORS 响应头都没有**。真做成前后端分离部署就必须放开 CORS，
+那层保护会直接消失，而且没有任何登录能兜底。所以：
+
+- 开发期 Vite 的 `server.proxy` 把 `/api` 转给后端，浏览器看到的始终是同源
+- 生产期 Vite 产物写进 `src/main/resources/static/app/`，随 jar 一起发布
+
+两种形态都不需要 CORS。`SecurityInvariantsTest.noCorsIsEnabled` 会在构建期拦住
+`@CrossOrigin`、`addCorsMappings` 和 `Access-Control-Allow`。
+
+**要真做独立部署，得先给管理端做认证** —— 有了凭证校验，CORS 才有得谈。
+
+### 几处刻意的取舍
+
+- **不引用任何外网资源**。部署环境可能是没有外网的内网，CDN 会让界面直接不可用。
+  样式和脚本全部随 jar 发布，`UiServingTest` 会验入口文档只引用同源相对路径，
+  且页面和脚本里都没有 CDN 域名。
+- **暂时没有 UI 组件库**，样式是 `frontend/src/styles/app.css` 里的一份自带样式表。
+  三个页面都做完之后再统一选型，避免过早锁死在某一家的组件模型上。
 - **编辑子 MCP 时默认不提交 headers**。页面上显示的是遮罩值 `******`，原样提交回去会把真凭证
-  覆盖掉，所以要先勾"替换 headers"才会带上这个字段。
-- **令牌只在创建和轮换后当场显示一次**，且创建后不自动跳转 —— 跳转会把令牌冲掉。
-- 所有提示文案都用 `textContent` 写入，不拼 HTML：错误信息里可能带下游返回的内容。
-
-管理界面和 API 同源，没有登录也没有 CSRF 令牌（需求 3.2 不含权限系统）。当前 API 只接受
-`application/json`，且没有配置任何 CORS 响应头，跨站请求会被浏览器的预检拦下 ——
-**不要给这些接口加 `@CrossOrigin` 或放开 CORS**，那会打掉这层保护。
+  覆盖掉，所以要先勾"替换 headers"才会带上这个字段。这条语义由
+  `frontend/test/gateway-detail-view.spec.ts` 钉住 —— 它断言的是请求体里**没有这个键**，
+  而不是它的值是 undefined。
+- **令牌只在创建和轮换后当场显示一次**。它只活在组件的 props 里，页面不刷新，
+  也就不存在被冲掉的可能。
+- **提示文案一律走文本插值，不拼 HTML**：错误信息里可能带下游返回的内容，拼进 HTML
+  就是一个存储型 XSS。全站用 `{{ }}`，不用 `v-html`。
+- **变更后只重取数据，不整页刷新**。大多数写接口本来就返回完整的 `GatewayDetailResponse`，
+  直接拿返回值替换状态即可；只有同步接口只返回统计，才需要再取一次详情。
+- **粘贴的 mcpServers JSON 原样转发**，前端不先绑一层模型。服务端要靠里面有没有
+  `command` / `args` / `env` 判定 stdio 配置并报 `UNSUPPORTED_TRANSPORT`；
+  前端过一道模型会把这些未知字段悄悄吃掉，用户就会看到一个"导入成功"却完全不是他想要的结果。
 
 ## Agent 接入
 
@@ -187,7 +252,34 @@ docker compose up -d --build
 - 进程异常退出遗留的 `STARTED` 记录，下次启动时被标记为 `ERROR`（需求 13.2）。
 - 指标经 Micrometer 暴露；actuator 的 web 端点默认只放开 `health`。
 
-MVP 不提供调用记录的查询接口和前端页面（FR-06.5），排查时直接查库。
+## 调用记录查询
+
+需求 FR-06.5 的查询接口和页面（MVP 阶段是空的，排障只能连库）：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/gateways/{id}/call-records` | 分页列表，支持按工具名、子 MCP、状态、trace_id、时间范围筛选 |
+| `GET` | `/api/gateways/{id}/call-records/{callId}` | 单条完整内容，**含入参和返回正文** |
+
+界面在 `/ui/gateways/{id}/calls`，从详情页进去。
+
+三处刻意的取舍：
+
+- **列表不返回 `request_json` / `response_json`。** 那两列按 FR-06.4 原样保存不截断，
+  单条就可能接近 1 MiB，装的是知识库正文。列表一次几十条把它们带上，等于在一个没有登录的
+  接口上成批摊开业务内容。正文只能按 `callId` 一条一条取 ——
+  `CallRecordApiTest.listNeverCarriesPayloads` 在构建期守着这条。
+- **记录严格按网关隔离。** 列表永远带 `gateway_id` 条件，取单条时再校验归属；
+  拿别的网关的 `callId` 来查，得到的是和"不存在"完全一致的 `CALL_RECORD_NOT_FOUND`。
+  `callId` 是 UUID 猜不到，但"猜不到"不是访问控制。
+- **`statusCounts` 不套用 `status` 筛选**，其余条件照常生效。它是给界面做分面切换用的 ——
+  已经筛了 `ERROR` 还只显示 `ERROR` 的数量，就没法拿它跳到别的状态了。
+
+非法的 `status` / `from` / `to` 一律报 `INVALID_REQUEST` 而不是静默忽略：静默忽略会让操作人
+以为"筛出来就这些"，而实际上根本没筛。`size` 超过 100 则收敛到 100，响应里的 `size` 字段
+说明实际用了多少。
+
+**调用记录目前没有清理或归档策略**，只在删除网关时级联删除。长期运行需要自行处理。
 
 ## 同步行为
 

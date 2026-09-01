@@ -166,9 +166,13 @@ class AcceptanceFlowTest {
                 "{\"customDescription\":\"检索 A 库；查人名和制度条款优先用它\"}");
 
         // ---- 第 5 步：复制前端生成的 Agent 接入 JSON -----------------------
+        /*
+         * 详情页是 Vue 单页应用的空壳，页面本身不含任何数据 —— 所以这里只验它可达，
+         * 内容验在它实际渲染所依据的那个接口上。
+         * 页面把这份 JSON 渲染成什么样，由 frontend/test/gateway-detail-view.spec.ts 验。
+         */
         String detailPage = this.rest.getForObject("/ui/gateways/" + gatewayId, String.class);
-        assertThat(detailPage).contains("Agent 接入").contains("&lt;gateway-access-token&gt;");
-        assertThat(detailPage).doesNotContain(DOWNSTREAM_TOKEN);
+        assertThat(detailPage).contains("id=\"app\"").contains("/app/assets/");
 
         JsonNode agentConfig = this.rest.getForObject(
                 "/api/gateways/" + gatewayId + "/agent-config", JsonNode.class);
@@ -176,6 +180,11 @@ class AcceptanceFlowTest {
         assertThat(entry.get("type").asText()).isEqualTo("streamable-http");
         String mcpUrl = entry.get("url").asText();
         assertThat(mcpUrl).endsWith("/mcp/acceptance");
+
+        // 令牌位置是占位符（服务端只有哈希），且这份 JSON 里不含任何子 MCP 凭证
+        assertThat(entry.at("/headers/Authorization").asText())
+                .isEqualTo("Bearer <gateway-access-token>");
+        assertThat(agentConfig.toString()).doesNotContain(DOWNSTREAM_TOKEN);
 
         // ---- 第 6 步：Agent 连接总 MCP，发现工具并成功调用 -----------------
         // 完全按接入 JSON 的形态连接：streamable-http + Bearer 令牌

@@ -8,10 +8,15 @@ WORKDIR /build
 COPY pom.xml ./
 RUN mvn -B -q dependency:go-offline
 
+# 管理前端。frontend-maven-plugin 会在 mvn 构建里下载 Node 并跑 `npm ci && npm run build`，
+# 产物落进 src/main/resources/static/app/ 后被打进 jar —— 前后端仍是一个部署单元。
+# 注意这一步需要能访问 nodejs.org 和 npm registry；完全离线的构建环境需要预置镜像源。
+COPY frontend ./frontend
 COPY src ./src
 # 镜像构建不跑测试：测试需要真实的随机端口和临时数据库，属于 CI 的职责。
 # CI 应当先 `mvn verify`（含覆盖率门禁）通过，再来构建镜像。
-RUN mvn -B -q -DskipTests package
+# frontend.test.skip 要单独给 —— Maven 的 skipTests 只对 surefire 生效，管不到 npm。
+RUN mvn -B -q -DskipTests -Dfrontend.test.skip=true package
 
 # ---------------------------------------------------------------- 运行阶段
 FROM eclipse-temurin:21-jre-noble AS runtime
