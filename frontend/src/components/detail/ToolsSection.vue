@@ -4,6 +4,10 @@ import ToolRow from './ToolRow.vue'
 
 defineProps<{ gatewayId: string, downstreams: DownstreamMcp[] }>()
 const emit = defineEmits<{ toolUpdated: [GatewayTool] }>()
+
+function enabledCount(downstream: DownstreamMcp): number {
+  return downstream.tools.filter(tool => tool.enabled).length
+}
 </script>
 
 <template>
@@ -14,8 +18,13 @@ const emit = defineEmits<{ toolUpdated: [GatewayTool] }>()
         先配置子 MCP 并同步，工具会出现在这里。
       </p>
 
-      <div v-for="downstream in downstreams" :key="downstream.id">
-        <h2 class="section-title mono">{{ downstream.name }}</h2>
+      <div v-for="downstream in downstreams" :key="downstream.id" class="tools-group">
+        <h2 class="tools-group-head">
+          <span class="mono name">{{ downstream.name }}</span>
+          <span v-if="downstream.tools.length > 0" class="tools-count">
+            {{ enabledCount(downstream) }} / {{ downstream.tools.length }} 启用
+          </span>
+        </h2>
 
         <p v-if="downstream.tools.length === 0" class="muted small" style="margin: 0">
           这个子 MCP 还没有同步到工具。
@@ -23,13 +32,21 @@ const emit = defineEmits<{ toolUpdated: [GatewayTool] }>()
 
         <div v-else class="table-wrap">
           <table class="table tools">
+            <!-- 固定列宽：多个子 MCP 各自一张表，不定宽的话每张表的列都对不齐 -->
+            <colgroup>
+              <col style="width: 3.75rem">
+              <col style="width: 21%">
+              <col style="width: 17%">
+              <col>
+              <col style="width: 7rem">
+            </colgroup>
             <thead>
               <tr>
-                <th style="width: 4.5rem">启用</th>
+                <th>启用</th>
                 <th>聚合工具名</th>
                 <th>原工具名</th>
                 <th>描述</th>
-                <th style="width: 8rem">最近同步</th>
+                <th>最近同步</th>
               </tr>
             </thead>
             <tbody>

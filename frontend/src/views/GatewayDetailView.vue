@@ -10,6 +10,8 @@ import GatewayBasicsCard from '../components/detail/GatewayBasicsCard.vue'
 import DownstreamSection from '../components/detail/DownstreamSection.vue'
 import ToolsSection from '../components/detail/ToolsSection.vue'
 import AgentAccessCard from '../components/detail/AgentAccessCard.vue'
+import AppIcon from '../components/AppIcon.vue'
+import TableSkeleton from '../components/TableSkeleton.vue'
 
 /*
  * 需求 10.2 的四段：基本信息 / 子 MCP 配置 / 聚合工具 / Agent 接入。
@@ -82,12 +84,14 @@ async function onDeleted(): Promise<void> {
 </script>
 
 <template>
-  <div v-if="loading" class="empty-state">加载中…</div>
+  <div v-if="loading" class="card"><TableSkeleton :rows="5" /></div>
 
   <div v-else-if="notFound" class="card">
-    <div class="empty-state stack">
-      <p>没有找到这个网关，它可能已经被删除。</p>
-      <div><RouterLink class="btn" to="/gateways">返回网关列表</RouterLink></div>
+    <div class="empty-state">
+      <AppIcon name="search" :size="30" />
+      <div class="title">没有找到这个网关</div>
+      <p>它可能已经被删除。</p>
+      <RouterLink class="btn" to="/gateways">返回网关列表</RouterLink>
     </div>
   </div>
 

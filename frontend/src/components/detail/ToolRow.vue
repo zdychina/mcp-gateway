@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { toolApi } from '../../api/gateways'
 import { ApiError } from '../../api/client'
 import type { GatewayTool } from '../../api/types'
@@ -16,6 +16,9 @@ const togglingEnabled = ref(false)
 /** 本地草稿。服务端返回新值后跟着同步，避免保存完还显示旧内容。 */
 const draft = ref('')
 watch(() => props.tool.customDescription, value => { draft.value = value ?? '' }, { immediate: true })
+
+/** 没改动就没什么可存的，保存按钮置灰，行里少一个抢眼的可点元素 */
+const dirty = computed(() => draft.value.trim() !== (props.tool.customDescription ?? ''))
 
 function describe(error: unknown): string {
   return error instanceof ApiError ? error.display : String(error)
@@ -69,28 +72,34 @@ async function saveDescription(): Promise<void> {
 
 <template>
   <tr :class="{ disabled: !tool.enabled }">
-    <td>
+    <td class="toggle-cell">
       <label class="switch">
         <input type="checkbox" :checked="tool.enabled" :disabled="togglingEnabled"
                :aria-label="`启用 ${tool.exposedName}`" @change="toggle">
         <span></span>
       </label>
     </td>
-    <td class="mono small">{{ tool.exposedName }}</td>
-    <td class="mono small muted">{{ tool.originalName }}</td>
-    <td>
-      <div class="small muted mb-1">
-        原始描述：{{ tool.originalDescription || '（无）' }}
-      </div>
-      <div class="input-group">
-        <textarea v-model="draft" class="control" rows="2" maxlength="4000"
-                  :aria-label="`${tool.exposedName} 的自定义描述`"
-                  placeholder="自定义描述，留空则回退到原始描述"></textarea>
-        <button class="btn btn-sm" type="button" :disabled="savingDescription"
-                @click="saveDescription">保存</button>
+    <td class="mono small tool-name">{{ tool.exposedName }}</td>
+    <td class="mono small tool-name muted">{{ tool.originalName }}</td>
+    <td class="tool-desc">
+      <!-- 原始描述长短差很多，截断到三行，不然行高参差一大截 -->
+      <p class="origin-desc" :title="tool.originalDescription ?? ''">
+        <span class="label">原始</span>
+        <span v-if="tool.originalDescription">{{ tool.originalDescription }}</span>
+        <span v-else class="subtle">下游没有提供描述</span>
+      </p>
+      <textarea v-model="draft" class="control" rows="2" maxlength="4000"
+                :aria-label="`${tool.exposedName} 的自定义描述`"
+                placeholder="自定义描述，留空则回退到原始描述"></textarea>
+      <div class="desc-actions">
+        <span class="hint">
+          {{ dirty ? '未保存' : (tool.customDescription ? '已覆盖原始描述' : '使用原始描述') }}
+        </span>
+        <button class="btn btn-sm" type="button" :disabled="savingDescription || !dirty"
+                @click="saveDescription">{{ savingDescription ? '保存中…' : '保存' }}</button>
       </div>
     </td>
-    <td class="small muted" :title="formatDateTime(tool.lastSyncedAt)">
+    <td class="small muted synced" :title="formatDateTime(tool.lastSyncedAt)">
       {{ formatRelative(tool.lastSyncedAt) }}
     </td>
   </tr>

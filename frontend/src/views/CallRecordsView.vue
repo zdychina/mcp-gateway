@@ -8,6 +8,8 @@ import type { CallRecordDetail, CallRecordPage, CallStatus, GatewayDetail } from
 import { formatDateTime, formatRelative } from '../utils/datetime'
 import { useAlerts } from '../composables/useAlerts'
 import CallStatusBadge from '../components/CallStatusBadge.vue'
+import AppIcon from '../components/AppIcon.vue'
+import TableSkeleton from '../components/TableSkeleton.vue'
 
 /*
  * 调用记录查询页（需求 FR-06.5）。
@@ -267,19 +269,25 @@ function durationLabel(ms: number | null): string {
   </section>
 
   <section class="card">
-    <div v-if="loading" class="empty-state">加载中…</div>
+    <TableSkeleton v-if="loading" :rows="6" />
 
-    <div v-else-if="loadFailed" class="empty-state stack">
-      <p>没能取到调用记录。</p>
-      <div><button class="btn" type="button" @click="load">重试</button></div>
+    <div v-else-if="loadFailed" class="empty-state">
+      <AppIcon name="warning" :size="28" />
+      <div class="title">没能取到调用记录</div>
+      <button class="btn" type="button" @click="load">重试</button>
     </div>
 
     <div v-else-if="!result || result.items.length === 0" class="empty-state">
       <template v-if="totalCount === 0">
-        这个网关还没有任何调用记录。Agent 调用一次工具之后就会出现。
+        <AppIcon name="inbox" :size="30" />
+        <div class="title">这个网关还没有任何调用记录</div>
+        <p>Agent 调用一次工具之后就会出现。每次 <code>tools/call</code> 都会留下一条，
+          未知工具和已停用工具的调用同样不会漏。</p>
       </template>
       <template v-else>
-        没有符合当前筛选条件的记录。
+        <AppIcon name="search" :size="28" />
+        <div class="title">没有符合当前筛选条件的记录</div>
+        <button class="btn" type="button" @click="reset">清空筛选</button>
       </template>
     </div>
 
@@ -301,7 +309,7 @@ function durationLabel(ms: number | null): string {
             <template v-for="item in result.items" :key="item.callId">
               <tr class="record" :class="{ open: openCallId === item.callId }"
                   @click="toggle(item.callId)">
-                <td class="expander">{{ openCallId === item.callId ? '▾' : '▸' }}</td>
+                <td class="expander"><AppIcon name="chevron" :size="14" /></td>
                 <td class="small" :title="formatDateTime(item.startedAt)">
                   {{ formatRelative(item.startedAt) }}
                 </td>

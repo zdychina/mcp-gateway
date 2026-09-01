@@ -7,6 +7,8 @@ import { formatDateTime, formatRelative } from '../utils/datetime'
 import { useAlerts } from '../composables/useAlerts'
 import StatusBadge from '../components/StatusBadge.vue'
 import TokenReveal from '../components/TokenReveal.vue'
+import AppIcon from '../components/AppIcon.vue'
+import TableSkeleton from '../components/TableSkeleton.vue'
 
 const alerts = useAlerts()
 
@@ -169,19 +171,23 @@ async function remove(gateway: GatewaySummary): Promise<void> {
   </div>
 
   <div class="card">
-    <div v-if="loading" class="empty-state">加载中…</div>
+    <TableSkeleton v-if="loading" />
 
     <div v-else-if="loadFailed" class="empty-state">
-      <p>没能取到网关列表。</p>
+      <AppIcon name="warning" :size="28" />
+      <div class="title">没能取到网关列表</div>
       <button class="btn" type="button" @click="reload">重试</button>
     </div>
 
     <div v-else-if="gateways.length === 0" class="empty-state">
-      还没有网关。点右上角「创建网关」开始。
+      <AppIcon name="inbox" :size="30" />
+      <div class="title">还没有网关</div>
+      <p>点右上角「创建网关」开始：一个网关聚合最多 3 个子 MCP，对 Agent 只暴露一个地址和一个令牌。</p>
     </div>
 
     <div v-else-if="filtered.length === 0" class="empty-state">
-      没有匹配「{{ keyword }}」的网关。
+      <AppIcon name="search" :size="28" />
+      <div class="title">没有匹配「{{ keyword }}」的网关</div>
     </div>
 
     <div v-else class="table-wrap">
