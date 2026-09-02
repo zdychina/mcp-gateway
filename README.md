@@ -15,6 +15,7 @@ gateway/
   src/test/java/                    单元与验收测试
   frontend/                         管理前端（Vite + Vue 3 + TypeScript）
   Dockerfile / docker-compose.yml   容器化部署
+  DEPLOY.md                         jar 部署（测试/内网服务器）
 ```
 
 管理前端是 Vue 单页应用，产物由 Vite 打进 `src/main/resources/static/app/`，随 jar 一起发布。
@@ -140,7 +141,7 @@ docker compose up -d --build
 - `MCP_GATEWAY_BASE_URL` 必须是 Agent 实际能访问到的地址，不能是容器内部视角的 `127.0.0.1` ——
   它会原样写进接入 JSON（需求 FR-05.1）。
 
-安全走查见 [SECURITY.md](SECURITY.md)。
+以可执行 jar 部署到测试/内网服务器见 [DEPLOY.md](DEPLOY.md)。安全走查见 [SECURITY.md](SECURITY.md)。
 
 测试用内存 H2，每次从空库跑一遍完整 Flyway 迁移；主密钥由 `TestMasterKey` 每次随机生成，仓库里不留任何密钥字面量。
 
