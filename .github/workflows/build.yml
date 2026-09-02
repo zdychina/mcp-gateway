@@ -1,0 +1,79 @@
+# 推送即构建：跑完整的 `mvn verify`（含四道门禁），产出可下载的 jar。
+#
+# 为什么是 verify 而不是 package：package 只打包，跳过 jacoco 覆盖率门禁、
+# SecurityInvariantsTest 和前端 Vitest。CI 的价值在门禁，不在产物。
+name: build
+
+on:
+  push:
+    branches: [main, dev]
+    tags: ['v*']
+  pull_request:
+    branches: [main, dev]
+  # 手动触发，用于不改代码时重新出包
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # 同一分支上连续推送时，取消还在跑的旧构建，别排队浪费额度
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # 冷缓存时前端要下 Node + npm ci，给足余量
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          # pom 的 enforcer 要求 Java 21+
+          java-version: '21'
+          distribution: 'temurin'
+          # ~/.m2/repository 按 pom.xml 的哈希缓存
+          cache: maven
+
+      # frontend-maven-plugin 会自己下一份 Node 到 target/（版本由 pom 的
+      # node.version 写死），所以这里**不装 Node**，只缓存 npm 的下载目录 ——
+      # `npm ci` 每次都清空 node_modules 重装，缓存 ~/.npm 才有意义。
+      - name: Cache npm downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: npm-${{ runner.os }}-
+
+      # 不能加 -Dfrontend.skip=true：前端产物 src/main/resources/static/app/
+      # 在 .gitignore 里，CI 是全新克隆，跳过前端构建会让页面测试直接失败。
+      #
+      # 这里也不跑 -Psecurity（OWASP dependency-check）：它要 NVD API Key，
+      # 且首次要下载整个漏洞库，不适合每次推送都来一遍。见下面的 security.yml。
+      - name: Build and verify
+        run: mvn -B -ntp clean verify
+
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-gateway-jar-${{ github.sha }}
+          # 只要可执行的 boot jar，*.jar.original 是重打包前的原始件，不要
+          path: target/mcp-gateway-*.jar
+          if-no-files-found: error
+          retention-days: 30
+
+      # 失败时把报告带出来，省得为了看一行错误再本地复现一遍
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ github.sha }}
+          path: |
+            target/surefire-reports/
+            target/site/jacoco/
+          if-no-files-found: ignore
+          retention-days: 7
