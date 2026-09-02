@@ -98,6 +98,33 @@ mvn -Psecurity verify -Dnvd.api.key=<你的 NVD API Key>
 
 它需要下载并更新 NVD 数据库，首次很慢且离线环境会失败，所以不放进日常构建。
 
+## 持续集成与发版
+
+`.github/workflows/build.yml`。推送到 `main` / `dev`、提 PR、打 `v*` 标签都会跑一遍
+完整的 `mvn verify`（四道门禁全在里面），jar 作为 artifact 上传，保留 30 天。
+
+跑的是 `verify` 不是 `package` —— 后者会跳过全部门禁。CI 里也**不能**带
+`-Dfrontend.skip=true`：前端产物目录在 `.gitignore` 里，CI 是全新克隆，跳过前端构建
+会让页面测试直接失败。Node 由 `frontend-maven-plugin` 自己下载，runner 不用预装。
+
+`-Psecurity` 不在 CI 里跑（要 NVD API Key，首次要下载整个漏洞库），仍按上面的要求
+在发布前手工跑一次。
+
+发版按这个顺序，**先改版本再打标签**：
+
+```bash
+mvn versions:set -DnewVersion=0.1.0 -DgenerateBackupPoms=false   # 去掉 -SNAPSHOT
+git commit -am "发布 0.1.0" && git push
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+标签构建通过后，会用**同一份已过门禁的 jar**（不重新构建）建一个 GitHub Release，
+发布说明自动生成。带连字符的标签（`v0.2.0-rc1`）自动标成预发布。
+
+版本必须对得上：release 那步会校验 jar 版本与标签一致，不一致直接失败。这道闸门是
+必要的 —— `enforcer` 的 `requireReleaseDeps` 只管依赖和父 pom，管不到项目自身版本，
+带着 `-SNAPSHOT` 打标签构建照样是绿的，发出去的资产却名不副实。
+
 ## 容器部署
 
 ```bash

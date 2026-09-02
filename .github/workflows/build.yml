@@ -77,3 +77,61 @@ jobs:
             target/site/jacoco/
           if-no-files-found: ignore
           retention-days: 7
+
+  # 打 v* 标签时把上面**那一份已经过门禁的 jar** 发成 Release。
+  # 不重新构建：重建出来的就不是被验证过的那个产物了。
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      # 只有这个 job 需要写权限（建 Release、传资产），不放到 workflow 级别
+      contents: write
+
+    steps:
+      - name: Download jar from build job
+        uses: actions/download-artifact@v4
+        with:
+          name: mcp-gateway-jar-${{ github.sha }}
+
+      # pom 的版本是 0.1.0-SNAPSHOT，而 enforcer 的 requireReleaseDeps 只管依赖和
+      # 父 pom，管不到项目自身版本 —— 也就是说带着 -SNAPSHOT 打标签，构建照样是绿的。
+      # 那样发出去的 Release 资产会叫 mcp-gateway-0.1.0-SNAPSHOT.jar，jar 内部的
+      # MANIFEST 版本也是 SNAPSHOT，和 v0.1.0 这个标签对不上。
+      #
+      # 所以这里挡一道：jar 的版本必须和标签一致。发版流程是**先改 pom 版本、
+      # 提交，再打标签**。版本号直接从产物文件名取，不用再解析一次 pom。
+      - name: Check jar version matches tag
+        run: |
+          set -euo pipefail
+          jar=$(ls mcp-gateway-*.jar)
+          jar_version=${jar#mcp-gateway-}
+          jar_version=${jar_version%.jar}
+          tag_version=${GITHUB_REF_NAME#v}
+          if [ "$jar_version" != "$tag_version" ]; then
+            echo "::error::标签 ${GITHUB_REF_NAME} 与 jar 版本 ${jar_version} 不一致。"
+            echo "::error::发版前请先把 pom.xml 的 <version> 改成 ${tag_version} 并提交，再重新打标签。"
+            exit 1
+          fi
+          echo "JAR_PATH=$jar" >> "$GITHUB_ENV"
+
+      # 用 runner 自带的 gh CLI，不引第三方 action —— 这个 job 有 contents: write，
+      # 引入的每一个第三方 action 都是拿着写权限的供应链入口。
+      #
+      # 标签里带连字符的（v0.2.0-rc1 之类）自动标成预发布。
+      # 想先人工过一眼再公开，给 gh release create 加 --draft。
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          prerelease=""
+          case "$GITHUB_REF_NAME" in
+            *-*) prerelease="--prerelease" ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            $prerelease \
+            "$JAR_PATH"
