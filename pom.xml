@@ -73,6 +73,16 @@
       <artifactId>spring-boot-starter-validation</artifactId>
     </dependency>
     <!--
+      管理端登录（需求 12.8）。引入 Security 只为拿到会话管理、CSRF 令牌和口令编码器，
+      认证策略全部在 SecurityConfig 里显式声明：
+        - /mcp/** 走自己的 Bearer 校验，在第一条过滤器链里保持无状态、不种 Cookie；
+        - 登录接口收 JSON 而不是表单，formLogin 刻意没有启用（见 SECURITY.md）。
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-security</artifactId>
+    </dependency>
+    <!--
       需求 FR-06.2：打点写入失败时必须写应用错误日志和指标。
       引入 actuator 只为拿到 MeterRegistry；web 端点在 application.yml 里默认只放开 health。
     -->
@@ -104,6 +114,11 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.security</groupId>
+      <artifactId>spring-security-test</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>

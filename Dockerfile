@@ -34,7 +34,7 @@ USER mcpgw
 
 # 容器里必须监听 0.0.0.0，否则端口映射进来也连不上。
 # 注意这就等于放弃了"默认只监听 localhost"那道保护（需求 12.6 / 12.8）：
-# 容器端口只能发布到本机或可信内网，绝不能直接暴露到公网。
+# 管理端有登录，但那时挡在前面的就只剩一个口令，容器端口仍应只发布到本机或可信内网。
 ENV MCP_GATEWAY_BIND_ADDRESS=0.0.0.0 \
     MCP_GATEWAY_PORT=8080 \
     MCP_GATEWAY_DB_PATH=/app/data/mcp-gateway \
@@ -45,7 +45,8 @@ VOLUME ["/app/data"]
 
 EXPOSE 8080
 
-# MCP_GATEWAY_MASTER_KEY 没有默认值，缺失时应用会启动失败 —— 这是刻意的（需求 12.1）。
+# MCP_GATEWAY_MASTER_KEY 和 MCP_GATEWAY_ADMIN_PASSWORD 都没有默认值，缺失时应用启动失败 ——
+# 这是刻意的（需求 12.1 / 12.8）。做了 TLS 反代时还要设 MCP_GATEWAY_COOKIE_SECURE=true。
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
   CMD ["sh", "-c", "wget -q -O - http://127.0.0.1:${MCP_GATEWAY_PORT}/actuator/health | grep -q UP"]
 

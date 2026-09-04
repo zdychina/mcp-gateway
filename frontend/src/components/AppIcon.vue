@@ -16,7 +16,9 @@ const PATHS: Record<string, string> = {
   chevron: 'M9 5l7 7-7 7',
   inbox: 'M4 13h4l2 3h4l2-3h4M4 13V6a2 2 0 012-2h12a2 2 0 012 2v7m-16 0v5a2 2 0 002 2h12a2 2 0 002-2v-5',
   warning: 'M12 9v4m0 4h.01M10.3 3.9L2.4 17.5A2 2 0 004.1 20.5h15.8a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z',
-  search: 'M11 19a8 8 0 100-16 8 8 0 000 16zm10 2l-4.35-4.35'
+  search: 'M11 19a8 8 0 100-16 8 8 0 000 16zm10 2l-4.35-4.35',
+  lock: 'M7 11V8a5 5 0 0110 0v3M5 11h14a1 1 0 011 1v8a1 1 0 01-1 1H5a1 1 0 01-1-1v-8a1 1 0 011-1z',
+  exit: 'M15 17l5-5-5-5M20 12H9M12 20H6a2 2 0 01-2-2V6a2 2 0 012-2h6'
 }
 
 const d = computed(() => PATHS[props.name] ?? '')

@@ -63,12 +63,77 @@ class SecurityInvariantsTest {
     }
 
     @Test
+    @DisplayName("需求 12.1 / 12.8：管理员口令没有内置默认值，只能来自环境变量")
+    void adminPasswordHasNoDefault() throws IOException {
+        String applicationYml = Files.readString(MAIN_RESOURCES.resolve("application.yml"),
+                StandardCharsets.UTF_8);
+
+        /*
+         * 与主密钥同样的道理：一旦这里有了默认值，所有没读完文档的部署都会用同一把钥匙，
+         * 而管理端此时已经允许绑到内网地址了。
+         */
+        assertThat(applicationYml).contains("password: ${MCP_GATEWAY_ADMIN_PASSWORD:}");
+    }
+
+    @Test
+    @DisplayName("需求 12.8：会话 Cookie 保持 HttpOnly + SameSite=Strict，secure 由部署决定")
+    void sessionCookieStaysHardened() throws IOException {
+        String applicationYml = Files.readString(MAIN_RESOURCES.resolve("application.yml"),
+                StandardCharsets.UTF_8);
+
+        // HttpOnly：XSS 偷不走登录态。SameSite=Strict：当前挡住 CSRF 的主力。
+        assertThat(applicationYml).contains("http-only: true");
+        assertThat(applicationYml).contains("same-site: strict");
+        // secure 必须可配：默认部署是 localhost 明文 HTTP，写死 true 会让人登不进去。
+        assertThat(applicationYml).contains("secure: ${MCP_GATEWAY_COOKIE_SECURE:false}");
+    }
+
+    @Test
+    @DisplayName("需求 12.8：登录接口不用 formLogin / httpBasic —— 那会打掉“只收 JSON”这层保护")
+    void loginDoesNotFallBackToFormOrBasic() throws IOException {
+        /*
+         * formLogin 吃的是 application/x-www-form-urlencoded，httpBasic 会让浏览器弹出
+         * 原生认证框。两者都与"管理接口只收 application/json + 登录页由 SPA 渲染"冲突，
+         * 而它们又都只是一行配置，很容易在调试某个问题时被顺手加上。
+         */
+        // 只认真正的调用。注释和 Javadoc 里要解释"为什么不用它们"，按名字裸扫会全部误报。
+        Pattern enabled = Pattern.compile("\\.(formLogin|httpBasic)\\s*\\(");
+
+        List<String> hits = new ArrayList<>();
+        for (SourceFile file : sourcesUnder(MAIN_JAVA, ".java")) {
+            if (enabled.matcher(file.content()).find()) {
+                hits.add(file.path().toString());
+            }
+        }
+        assertThat(hits).as("启用了表单登录或 Basic 认证的位置").isEmpty();
+    }
+
+    @Test
+    @DisplayName("需求 12.8：只有 Agent 那条链可以关掉 CSRF，管理端不行")
+    void csrfIsDisabledOnlyForTheAgentChain() throws IOException {
+        /*
+         * /mcp/** 上的 Agent 带的是 Bearer 令牌而不是 Cookie，天然不受 CSRF 影响，关掉是对的。
+         * 管理端带的是会话 Cookie，关掉就等于把 CSRF 面完全敞开 —— 而两处写法一模一样，
+         * 复制粘贴过去不会有任何编译或测试提示。
+         */
+        String securityConfig = Files.readString(
+                MAIN_JAVA.resolve("com/mcpgateway/security/SecurityConfig.java"), StandardCharsets.UTF_8);
+
+        long disabled = securityConfig.lines()
+                .filter(line -> line.contains(".csrf(") && line.contains("disable"))
+                .count();
+
+        assertThat(disabled).as("关闭 CSRF 的位置数量").isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("需求 12.8：不给管理 API 放开 CORS —— 那会打掉浏览器预检这层保护")
     void noCorsIsEnabled() throws IOException {
         /*
-         * 管理端没有登录也没有 CSRF 令牌。目前挡住跨站请求的正是两点：
-         * API 只收 application/json，且没有任何 CORS 响应头，所以跨站 fetch 过不了预检。
-         * 一旦有人加了 @CrossOrigin 或 addCorsMappings，这层保护就没了。
+         * 管理端已经有了登录、SameSite=Strict 的会话 Cookie 和 CSRF 令牌，但"不发任何
+         * CORS 响应头"仍是独立的一层：跨站 fetch 过不了预检，连试的机会都没有。
+         * 放开 CORS 是一个独立决策，不因为多了登录就顺手做掉 ——
+         * 一旦有人加了 @CrossOrigin 或 addCorsMappings，这一层就没了。
          */
         List<String> hits = new ArrayList<>();
         for (SourceFile file : sourcesUnder(MAIN_JAVA, ".java")) {

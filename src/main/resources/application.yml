@@ -22,12 +22,27 @@ spring:
 
 server:
   servlet:
+    # 管理端登录会话（需求 12.8）。会话存在服务端内存里，Cookie 只带一个猜不到的会话 ID。
+    session:
+      # 闲置超时。管理端是低频操作界面，短一点没有代价。
+      timeout: 30m
+      cookie:
+        # JS 读不到会话 ID —— XSS 也就偷不走登录态。
+        http-only: true
+        # 管理端没有任何"从外站跳进来"的正当场景，Strict 无副作用，
+        # 且它是当前挡住 CSRF 的主力（CSRF 令牌是第二道）。
+        same-site: strict
+        # 默认 false：默认部署是 localhost 明文 HTTP，写死 true 会让 Cookie 根本不下发、
+        # 登录进不去。放在做了 TLS 的反向代理后面时必须显式设为 true。
+        secure: ${MCP_GATEWAY_COOKIE_SECURE:false}
     encoding:
       charset: UTF-8
       # 静态资源（app.js / app.css）里有中文注释与文案。Spring 默认以 text/javascript
       # 不带 charset 返回，浏览器只能回退到文档编码去猜。强制声明 UTF-8 去掉这个依赖。
       force-response: true
   # 需求 12.6：本地部署默认只监听 localhost。内网部署需显式覆盖 server.address。
+  # 管理端已有登录（见 mcp-gateway.security.admin），绑到内网地址成为可选项 ——
+  # 但纵深防御不因为多了一道就撤掉前一道，默认值保持回环。
   address: ${MCP_GATEWAY_BIND_ADDRESS:127.0.0.1}
   port: ${MCP_GATEWAY_PORT:8080}
   error:
@@ -45,6 +60,14 @@ mcp-gateway:
     master-key: ${MCP_GATEWAY_MASTER_KEY:}
     # 需求 12.6：允许的 Origin，逗号分隔；为空表示只接受不带 Origin 的请求。
     allowed-origins: ${MCP_GATEWAY_ALLOWED_ORIGINS:}
+    # 与 server.servlet.session.cookie.secure 读同一个环境变量，管的是 CSRF 令牌 Cookie。
+    cookie-secure: ${MCP_GATEWAY_COOKIE_SECURE:false}
+
+    # 需求 12.8：管理端的唯一账号。与主密钥同样的处理 —— 口令只能来自环境变量，
+    # 这里不得有默认值，缺失或短于 12 位时应用启动失败（见 AdminAccount）。
+    admin:
+      username: ${MCP_GATEWAY_ADMIN_USERNAME:admin}
+      password: ${MCP_GATEWAY_ADMIN_PASSWORD:}
 
   downstream:
     # 需求 6.6.5：默认下游调用超时 30 秒，可通过配置调整。
@@ -63,7 +86,8 @@ management:
   endpoints:
     web:
       exposure:
-        # 管理端没有登录，除健康检查外不放开任何 actuator 端点（需求 12.8）。
+        # 除健康检查外不放开任何 actuator 端点（需求 12.8）。健康检查是容器 healthcheck
+        # 的依赖，因此也是 SecurityConfig 里唯一公开的非 UI 路径。
         include: health
   endpoint:
     health:

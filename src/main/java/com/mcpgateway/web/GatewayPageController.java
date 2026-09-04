@@ -12,15 +12,18 @@ import org.springframework.web.bind.annotation.GetMapping;
  * 需求 10.1 / 10.2 那两个页面的验收断言相应地在 frontend/test/ 下，
  * 由 mvn verify 的 npm-test execution 执行。
  *
- * 注意这里没有登录和权限（需求 3.2），部署上只能靠网络边界保护（需求 12.8）。
+ * /ui/** 在 SecurityConfig 里是公开的：未登录时要靠这个入口文档把登录页本身发出来，
+ * 由前端路由决定渲染登录页还是主界面。真正的门在 /api/** 上 —— 拿到空壳也拉不到任何数据。
+ *
+ * 仍然没有权限系统（需求 3.2）：登录做的是身份校验，不是角色和授权。
  */
 @Controller
 public class GatewayPageController {
 
     /**
      * Vue 应用的入口文档。产物由 Vite 打进 static/app/，随 jar 一起发布 ——
-     * 与后端同源，因此不需要放开任何 CORS。这一点是刻意的：管理端没有登录也没有
-     * CSRF 令牌，"接口只收 JSON + 没有 CORS 响应头"就是当前仅有的跨站保护。
+     * 与后端同源，因此不需要放开任何 CORS。这一点是刻意的：独立部署就必须放开 CORS，
+     * 而同源是"不配置任何 CORS 响应头"这层跨站保护的前提，见 SECURITY.md。
      */
     private static final String SPA_ENTRY = "forward:/app/index.html";
 

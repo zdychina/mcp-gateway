@@ -25,7 +25,8 @@ import java.util.List;
 /**
  * 网关管理 API（需求 §8）。
  *
- * 注意需求 4.3 / 12.8：管理端没有登录，只能靠网络边界保护，默认只监听 localhost。
+ * 需求 12.8：本控制器下的所有接口都需要登录，由 SecurityConfig 统一收口，
+ * 这里不做任何逐接口的授权判断。需求 3.2 不含权限系统，因此也没有角色可判。
  */
 @RestController
 @RequestMapping("/api/gateways")

@@ -18,12 +18,36 @@ export class ApiError extends Error {
   }
 }
 
+/** 服务端下发的 CSRF 令牌 Cookie，以及回传它的请求头。 */
+const CSRF_COOKIE = 'XSRF-TOKEN'
+const CSRF_HEADER = 'X-XSRF-TOKEN'
+
+/**
+ * 会话失效时的回调。
+ *
+ * client 不直接 import router：那会让"发一个请求"和"页面往哪跳"互相依赖，
+ * 也让这个模块没法单独测。由 main.ts 在启动时把两者接起来。
+ */
+let onUnauthorized: (() => void) | null = null
+
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler
+}
+
+function readCookie(name: string): string | null {
+  const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'))
+  return match ? decodeURIComponent(match[1]) : null
+}
+
 /**
  * 统一处理 {success, data, error} 响应结构。
  *
- * 注意 Content-Type 恒为 application/json：管理 API 只接受这一种类型，
- * 而这正是当前防跨站请求的两道保护之一（另一道是完全不配置 CORS）。
- * 改成表单编码会打掉它 —— 见 SECURITY.md。
+ * 两个请求头都不是可选项：
+ *
+ * - Content-Type 恒为 application/json：管理 API 只接受这一种类型，改成表单编码
+ *   会打掉 SECURITY.md 里那道跨站保护。
+ * - 写请求带上 X-XSRF-TOKEN：管理端有了会话 Cookie 之后就有了 CSRF 面，
+ *   服务端会校验这个头。GET 不带 —— 安全方法本来就不在 CSRF 保护范围内。
  */
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' }
@@ -32,8 +56,24 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
     headers['Content-Type'] = 'application/json'
     init.body = JSON.stringify(body)
   }
+  if (method !== 'GET' && method !== 'HEAD') {
+    const csrfToken = readCookie(CSRF_COOKIE)
+    if (csrfToken) {
+      headers[CSRF_HEADER] = csrfToken
+    }
+  }
 
   const response = await fetch(url, init)
+
+  /*
+   * 会话过期或未登录。认证接口自己会返回 401（口令错），那是登录页要显示的错误，
+   * 不能触发"跳去登录页"的处理 —— 否则在登录页上输错口令会把页面自己刷掉。
+   *
+   * 注意这只是体验：真正的门在服务端，前端这一跳挡不住任何人。
+   */
+  if (response.status === 401 && !url.startsWith('/api/auth/')) {
+    onUnauthorized?.()
+  }
 
   let payload: ApiResponse<T> | null = null
   try {

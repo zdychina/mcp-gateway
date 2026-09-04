@@ -2,6 +2,7 @@ package com.mcpgateway.recording;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mcpgateway.TestAdminCredentials;
 import com.mcpgateway.TestMasterKey;
 import com.mcpgateway.domain.CallStatus;
 import com.mcpgateway.domain.DownstreamMcp;
@@ -57,6 +58,7 @@ class CallRecordingEndToEndTest {
     @DynamicPropertySource
     static void registerProperties(DynamicPropertyRegistry registry) {
         registry.add("mcp-gateway.security.master-key", () -> TestMasterKey.BASE64);
+        TestAdminCredentials.register(registry);
     }
 
     private static final String DOWNSTREAM_TOKEN = "Bearer sk-downstream-secret";

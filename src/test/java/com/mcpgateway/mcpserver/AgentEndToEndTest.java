@@ -1,5 +1,6 @@
 package com.mcpgateway.mcpserver;
 
+import com.mcpgateway.TestAdminCredentials;
 import com.mcpgateway.TestMasterKey;
 import com.mcpgateway.domain.DownstreamMcp;
 import com.mcpgateway.domain.Gateway;
@@ -24,6 +25,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -52,6 +59,7 @@ class AgentEndToEndTest {
     @DynamicPropertySource
     static void registerProperties(DynamicPropertyRegistry registry) {
         registry.add("mcp-gateway.security.master-key", () -> TestMasterKey.BASE64);
+        TestAdminCredentials.register(registry);
     }
 
     @LocalServerPort
@@ -74,6 +82,9 @@ class AgentEndToEndTest {
 
     @Autowired
     private AccessTokenService accessTokens;
+
+    @Autowired
+    private TestRestTemplate restTemplate;
 
     @Autowired
     private MockDownstreamMcpServer mockKbA;
@@ -393,5 +404,46 @@ class AgentEndToEndTest {
         McpSyncClient nestedClient = McpClient.sync(nested).build();
         this.openedClients.add(nestedClient);
         assertThatThrownBy(nestedClient::initialize).isInstanceOf(RuntimeException.class);
+    }
+
+    // -------------------------------------------------- 登录不得波及 Agent
+
+    @Test
+    @DisplayName("需求 12.8：管理端的登录不碰 Agent 端点 —— /mcp/* 一个 Cookie 都不种")
+    void mcpEndpointStaysStatelessForAgents() {
+        addDownstream("kb_a", MockDownstreamConfig.KB_A_PATH);
+        String mcpUrl = "http://localhost:" + this.port + GatewayMcpRuntime.mcpPath(this.gateway.slug());
+
+        /*
+         * Spring Security 的过滤器默认映射在 /* 上，会连 Agent 流量一起接管。
+         * SecurityConfig 里第一条链把 /mcp/** 单独摘出来设成无状态，就是为了这一条：
+         * 一旦哪天那条链的 matcher 写错（比如退回成 securityMatcher("/mcp/**")
+         * 那个按 servlet 内相对路径匹配的字符串重载），Agent 请求就会落到管理端链上，
+         * 开始收到 JSESSIONID，甚至直接撞在 CSRF 校验上。
+         *
+         * 带令牌和不带令牌各验一次：拒绝路径同样不能建会话，否则任何人都能靠一串
+         * 未认证请求把服务端的会话表撑起来。
+         */
+        HttpHeaders authorized = new HttpHeaders();
+        authorized.setContentType(MediaType.APPLICATION_JSON);
+        authorized.setBearerAuth(this.accessToken);
+
+        HttpHeaders anonymous = new HttpHeaders();
+        anonymous.setContentType(MediaType.APPLICATION_JSON);
+
+        String initialize = """
+                {"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+                  "protocolVersion":"2025-06-18","capabilities":{},
+                  "clientInfo":{"name":"cookie-probe","version":"1"}}}
+                """;
+
+        for (HttpHeaders headers : List.of(authorized, anonymous)) {
+            ResponseEntity<String> response = this.restTemplate.exchange(mcpUrl, HttpMethod.POST,
+                    new HttpEntity<>(initialize, headers), String.class);
+
+            assertThat(response.getHeaders().get(HttpHeaders.SET_COOKIE))
+                    .as("/mcp/* 的响应不得带 Set-Cookie（状态 %s）", response.getStatusCode())
+                    .isNullOrEmpty();
+        }
     }
 }

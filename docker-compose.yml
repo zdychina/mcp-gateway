@@ -8,14 +8,22 @@ services:
     environment:
       # 必填，没有默认值。生成方式：openssl rand -base64 32
       MCP_GATEWAY_MASTER_KEY: ${MCP_GATEWAY_MASTER_KEY:?请先设置 MCP_GATEWAY_MASTER_KEY}
+      # 必填，没有默认值，至少 12 位。管理端登录口令（需求 12.8）。
+      MCP_GATEWAY_ADMIN_PASSWORD: ${MCP_GATEWAY_ADMIN_PASSWORD:?请先设置 MCP_GATEWAY_ADMIN_PASSWORD}
+      MCP_GATEWAY_ADMIN_USERNAME: ${MCP_GATEWAY_ADMIN_USERNAME:-admin}
+      # 会话 Cookie 是否只在 HTTPS 上下发。下面的端口发布是明文 HTTP，所以默认 false；
+      # 放到做了 TLS 的反向代理后面时必须改成 true，否则登录态会在明文里裸奔。
+      MCP_GATEWAY_COOKIE_SECURE: ${MCP_GATEWAY_COOKIE_SECURE:-false}
       # Agent 接入 JSON 里的地址。必须是 Agent 实际能访问到的地址，
       # 不能用容器内部的 127.0.0.1（需求 FR-05.1）。
       MCP_GATEWAY_BASE_URL: ${MCP_GATEWAY_BASE_URL:-http://127.0.0.1:8080}
       MCP_GATEWAY_ALLOWED_ORIGINS: ${MCP_GATEWAY_ALLOWED_ORIGINS:-}
 
     ports:
-      # 只发布到本机回环。管理端没有登录，绑到 0.0.0.0 等于把它交给整个网络
-      # （需求 4.3 / 12.8）。内网部署请改成具体的内网地址，并放在反向代理后面。
+      # 只发布到本机回环。管理端已有登录，改成内网地址不再等于把它完全交出去，
+      # 但那时挡在前面的就只剩一个口令 —— 纵深防御不因为多了一道就撤掉前一道
+      # （需求 4.3 / 12.8）。真要开放，请绑具体的内网地址、放在反向代理后面，
+      # 并把 MCP_GATEWAY_COOKIE_SECURE 设为 true。
       - "127.0.0.1:8080:8080"
 
     volumes:

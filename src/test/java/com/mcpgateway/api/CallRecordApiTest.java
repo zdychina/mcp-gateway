@@ -28,7 +28,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * 调用记录查询 API（需求 FR-06.5）。
  *
- * 这个接口比其他管理接口更敏感：取单条会返回子 MCP 的返回正文，而管理端没有登录。
+ * 这个接口比其他管理接口更敏感：取单条会返回子 MCP 的返回正文 ——
+ * 登录挡住了匿名访问，但一把被偷走的会话在这里能捞到的东西远多于别处。
  * 所以除了功能，还要盯住两条边界 —— 列表不带正文，以及记录严格按网关隔离。
  */
 class CallRecordApiTest extends AbstractApiTest {
@@ -131,7 +132,7 @@ class CallRecordApiTest extends AbstractApiTest {
      * 这条是这个接口最重要的边界。
      *
      * request_json / response_json 按 FR-06.4 原样保存不截断，装的是知识库正文，
-     * 单条就可能接近 1 MiB。列表一次几十条把它们带上，等于在一个没有登录的接口上
+     * 单条就可能接近 1 MiB。列表一次几十条把它们带上，等于让一次请求就能
      * 成批摊开业务内容。
      */
     @Test

@@ -6,6 +6,8 @@
 
 当前进度：W1（工程骨架）、W2（数据层与密钥）、W3（网关与子 MCP 配置 API）、W4（下游客户端与同步引擎）、W5（对外 MCP Server 与调用路由）、W6（调用打点）、W7（管理前端）、W8（安全收口、验收测试与容器化）完成。MVP 功能范围已全部实现。
 
+MVP 之后：管理端加了登录（单账号、会话 Cookie），见下面的[管理端登录](#管理端登录)一节。
+
 目录布局：
 
 ```
@@ -27,7 +29,9 @@ gateway/
 
 ## 运行前置
 
-网关拒绝在没有主密钥的情况下启动 —— 这是刻意的，避免子 MCP 凭证退化成明文落库（需求 12.1 / 12.2）。
+网关拒绝在没有主密钥或没有管理员口令的情况下启动 —— 这是刻意的：前者避免子 MCP 凭证
+退化成明文落库（需求 12.1 / 12.2），后者避免管理端退化成一个人人都知道的弱口令（需求 12.8）。
+两者都没有默认值，也都不能写进配置文件。
 
 生成一把 32 字节主密钥：
 
@@ -46,8 +50,11 @@ PowerShell 下：
 | 变量 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `MCP_GATEWAY_MASTER_KEY` | 是 | 无 | Base64 编码的 32 字节 AES 主密钥。缺失或长度不对时启动失败 |
+| `MCP_GATEWAY_ADMIN_PASSWORD` | 是 | 无 | 管理端登录口令。缺失或短于 12 位时启动失败（需求 12.8） |
+| `MCP_GATEWAY_ADMIN_USERNAME` | 否 | `admin` | 管理端登录用户名 |
 | `MCP_GATEWAY_BASE_URL` | 建议 | `http://127.0.0.1:8080` | Agent 接入 JSON 里的地址，只能来自配置，不从请求头拼接（FR-05.1） |
-| `MCP_GATEWAY_BIND_ADDRESS` | 否 | `127.0.0.1` | 管理端无登录，默认只监听 localhost（需求 12.6 / 4.3） |
+| `MCP_GATEWAY_BIND_ADDRESS` | 否 | `127.0.0.1` | 默认只监听 localhost（需求 12.6 / 4.3）。有了登录之后绑内网地址是可选项，但默认值不变 |
+| `MCP_GATEWAY_COOKIE_SECURE` | 否 | `false` | 会话 Cookie 是否只在 HTTPS 上下发。**放在做了 TLS 的反向代理后面时必须设为 `true`** |
 | `MCP_GATEWAY_PORT` | 否 | `8080` | |
 | `MCP_GATEWAY_DB_PATH` | 否 | `./data/mcp-gateway` | H2 文件库路径。库里含知识库返回内容，需按部署要求保护（FR-06.4） |
 | `MCP_GATEWAY_ALLOWED_ORIGINS` | 否 | 空 | 逗号分隔。内网部署时显式配置允许来源 |
@@ -130,6 +137,7 @@ git tag v1.0.0 && git push origin v1.0.0
 
 ```bash
 export MCP_GATEWAY_MASTER_KEY=$(openssl rand -base64 32)
+export MCP_GATEWAY_ADMIN_PASSWORD='<至少 12 位的口令>'
 export MCP_GATEWAY_BASE_URL=http://<Agent 能访问到的地址>:8080
 docker compose up -d --build
 ```
@@ -137,13 +145,15 @@ docker compose up -d --build
 两个容器化特有的坑：
 
 - 容器里必须监听 `0.0.0.0`，这就**放弃了"默认只监听 localhost"那道保护**。compose 因此把端口
-  只发布到宿主机回环 `127.0.0.1:8080:8080`。管理端没有登录，改成 `0.0.0.0` 等于把它交给整个网络。
+  只发布到宿主机回环 `127.0.0.1:8080:8080`。管理端已有登录，改成 `0.0.0.0` 不再等于把它
+  完全交出去，但那时挡在前面的就只剩一个口令了 —— 纵深防御不因为多了一道就撤掉前一道。
 - `MCP_GATEWAY_BASE_URL` 必须是 Agent 实际能访问到的地址，不能是容器内部视角的 `127.0.0.1` ——
   它会原样写进接入 JSON（需求 FR-05.1）。
 
 以可执行 jar 部署到测试/内网服务器见 [DEPLOY.md](DEPLOY.md)。安全走查见 [SECURITY.md](SECURITY.md)。
 
-测试用内存 H2，每次从空库跑一遍完整 Flyway 迁移；主密钥由 `TestMasterKey` 每次随机生成，仓库里不留任何密钥字面量。
+测试用内存 H2，每次从空库跑一遍完整 Flyway 迁移；主密钥由 `TestMasterKey`、管理员口令由
+`TestAdminCredentials` 每次随机生成，仓库里不留任何凭证字面量。
 
 ## 代码结构
 
@@ -152,7 +162,7 @@ docker compose up -d --build
 | `api` | 统一响应结构 `{success, data, error}` 与全局异常出口 |
 | `error` | 稳定错误码枚举（需求 §11）与业务异常 |
 | `config` | 部署配置绑定 |
-| `security` | AES-GCM 加解密、子 MCP header 编解码、访问令牌、遮罩工具 |
+| `security` | AES-GCM 加解密、子 MCP header 编解码、Agent 访问令牌、遮罩工具；管理端登录策略（两条过滤器链、单账号、登录限速）|
 | `domain` | 四张表对应的领域记录与枚举 |
 | `repository` | Spring JDBC `JdbcClient` 数据访问 |
 | `lifecycle` | 启动时把遗留 `STARTED` 调用记录标记为 `ERROR`（需求 13.2） |
@@ -160,13 +170,18 @@ docker compose up -d --build
 | `downstream` | 下游 MCP 客户端、工具同步与快照合并、下游错误码映射 |
 | `mcpserver` | 对 Agent 暴露的 MCP 端点：slug 分发、令牌与 Origin 校验、tools/list 与 tools/call 路由 |
 | `recording` | 调用打点：两阶段写入、脱敏、指标 |
-| `web` | 管理前端的入口路由（把 /ui/** 转发给 SPA 空壳） |
+| `web` | 管理前端的入口路由（把 /ui/** 转发给 SPA 空壳，公开）|
 | `api.dto` | 管理 API 的请求与响应模型 |
 
 ## 管理 API
 
+除下面前三行外，所有接口都需要登录（见[管理端登录](#管理端登录)），未登录返回 401 `UNAUTHORIZED`。
+
 | 方法 | 路径 | 状态 |
 | --- | --- | --- |
+| `GET` | `/api/auth/session` | 已实现，**公开** —— 前端启动时判断登录态 |
+| `POST` | `/api/auth/login` | 已实现，**公开** —— 失败一律 `UNAUTHORIZED`，不区分用户名错还是口令错 |
+| `POST` | `/api/auth/logout` | 已实现，服务端销毁会话 |
 | `GET` | `/api/gateways` | 已实现 |
 | `POST` | `/api/gateways` | 已实现，响应含一次性明文令牌 |
 | `GET` | `/api/gateways/{id}` | 已实现 |
@@ -190,18 +205,21 @@ docker compose up -d --build
 
 ## 管理界面
 
-浏览器打开 `{baseUrl}/` 即可，会跳到网关列表页。前两个页面对应需求 §10，第三个是 FR-06.5 的查询界面：
+浏览器打开 `{baseUrl}/` 即可；未登录会先落在 `/ui/login`，登录后到网关列表页。
+前两个页面对应需求 §10，第三个是 FR-06.5 的查询界面：
 
 - **列表页** `/ui/gateways`：名称、slug、状态、子 MCP 数量、工具数量、更新时间，以及创建和删除。
+- **登录页** `/ui/login`：未登录时所有页面都会被路由守卫送到这里，登录后回到原本要去的地址。
 - **详情页** `/ui/gateways/{id}`：基本信息 / 子 MCP 配置 / 聚合工具 / Agent 接入 四段。
 - **调用记录页** `/ui/gateways/{id}/calls`：按工具、子 MCP、状态、trace_id 和时间筛选，展开看入参与返回。
 
 ### 实现方式：Vite + Vue 3 + TypeScript
 
-前端在 `frontend/`，三个页面同属一个 Vue 单页应用：
+前端在 `frontend/`，四个页面同属一个 Vue 单页应用：
 
 | 页面 | 组件 |
 | --- | --- |
+| 登录页 `/ui/login` | `frontend/src/views/LoginView.vue` |
 | 列表页 `/ui/gateways` | `frontend/src/views/GatewayListView.vue` |
 | 详情页 `/ui/gateways/{id}` | `frontend/src/views/GatewayDetailView.vue` |
 | 调用记录页 `/ui/gateways/{id}/calls` | `frontend/src/views/CallRecordsView.vue` |
@@ -211,9 +229,9 @@ docker compose up -d --build
 
 **产物同源打进 jar，不做独立部署。** 这是整个迁移最关键的一条约束，理由是安全而不是省事：
 
-管理端没有登录、没有会话、没有 CSRF 令牌。目前挡住跨站请求的只有两点 —— 接口只收
-`application/json`，以及**一个 CORS 响应头都没有**。真做成前后端分离部署就必须放开 CORS，
-那层保护会直接消失，而且没有任何登录能兜底。所以：
+挡住跨站请求的有四层，其中两层依赖同源：会话 Cookie 的 `SameSite=Strict`、CSRF 令牌、
+接口只收 `application/json`、以及**一个 CORS 响应头都没有**。做成前后端分离部署就必须放开 CORS，
+第四层直接消失，第一层也跟着失效 —— 跨源请求根本带不上 `SameSite=Strict` 的 Cookie。所以：
 
 - 开发期 Vite 的 `server.proxy` 把 `/api` 转给后端，浏览器看到的始终是同源
 - 生产期 Vite 产物写进 `src/main/resources/static/app/`，随 jar 一起发布
@@ -221,7 +239,8 @@ docker compose up -d --build
 两种形态都不需要 CORS。`SecurityInvariantsTest.noCorsIsEnabled` 会在构建期拦住
 `@CrossOrigin`、`addCorsMappings` 和 `Access-Control-Allow`。
 
-**要真做独立部署，得先给管理端做认证** —— 有了凭证校验，CORS 才有得谈。
+有了登录之后独立部署**技术上可行**了，但它是一个独立决策：还得处理跨源的会话载体，
+并把 CORS 收敛到确切的来源。不是加了登录就顺手能做的事。
 
 ### 几处刻意的取舍
 
@@ -243,6 +262,37 @@ docker compose up -d --build
 - **粘贴的 mcpServers JSON 原样转发**，前端不先绑一层模型。服务端要靠里面有没有
   `command` / `args` / `env` 判定 stdio 配置并报 `UNSUPPORTED_TRANSPORT`；
   前端过一道模型会把这些未知字段悄悄吃掉，用户就会看到一个"导入成功"却完全不是他想要的结果。
+
+## 管理端登录
+
+需求 3.2 不含权限系统，所以这里做的是**单账号身份校验**，不是用户体系：没有角色、没有授权、
+没有注册和找回密码。凭证只来自环境变量（`MCP_GATEWAY_ADMIN_USERNAME` /
+`MCP_GATEWAY_ADMIN_PASSWORD`），与主密钥同样的处理 —— 没有默认值，缺失或过短时启动失败。
+
+代价说在前面：**改口令要重启**。换来的是零数据库状态、无首启向导、无找回密码通道。
+
+| 路径 | 认证方式 |
+| --- | --- |
+| `/api/**` | 会话 Cookie（`SecurityConfig` 第二条链）|
+| `/mcp/**` | 网关访问令牌，Bearer（第一条链，无状态，**不受登录影响**）|
+| `/ui/**`、`/app/**` | 公开 —— 未登录时要靠它渲染登录页 |
+| `/actuator/health` | 公开，容器 healthcheck 依赖 |
+| 其余一切 | `denyAll` —— 新路径默认拒绝 |
+
+四处值得单独记一笔的实现细节：
+
+- **登录接口是手写的控制器，没有用 `formLogin`。** 后者只吃
+  `application/x-www-form-urlencoded`，而"管理接口只收 JSON"是跨站保护的一层。
+  代价是 `formLogin` 顺手做掉的两件事必须自己接上：登录后换会话 ID（会话固定防护）、
+  显式保存 `SecurityContext`（Spring Security 6 不再自动保存）。删掉任何一件都不会有编译错误。
+- **`/mcp/**` 那条链的 matcher 必须显式构造**，不能写成 `securityMatcher("/mcp/**")` ——
+  详见 [SECURITY.md](SECURITY.md) 的「登录不得波及 Agent 链路」。
+- **CSRF 的两个默认值都要改**，少改一个就是一个只在特定时序下复现的 403，同样见 SECURITY.md。
+- **登录失败按来源 IP 限速**，连续 5 次锁 5 分钟，锁定期间不比对口令。
+
+前端多了一个 `/ui/login` 页面和一个路由守卫。守卫是体验不是访问控制 —— 绕过它只能看到一个
+拉不到任何数据的空壳，真正的门在每一个 `/api` 请求上，由
+`ApiAuthorizationInvariantsTest` 逐个端点实打实地验一遍。
 
 ## Agent 接入
 
@@ -294,8 +344,9 @@ docker compose up -d --build
 三处刻意的取舍：
 
 - **列表不返回 `request_json` / `response_json`。** 那两列按 FR-06.4 原样保存不截断，
-  单条就可能接近 1 MiB，装的是知识库正文。列表一次几十条把它们带上，等于在一个没有登录的
-  接口上成批摊开业务内容。正文只能按 `callId` 一条一条取 ——
+  单条就可能接近 1 MiB，装的是知识库正文。列表一次几十条把它们带上，等于让一次请求
+  就能成批捞走业务内容 —— 有了登录也一样，一把被偷走的会话不该等于一次全量导出。
+  正文只能按 `callId` 一条一条取 ——
   `CallRecordApiTest.listNeverCarriesPayloads` 在构建期守着这条。
 - **记录严格按网关隔离。** 列表永远带 `gateway_id` 条件，取单条时再校验归属；
   拿别的网关的 `callId` 来查，得到的是和"不存在"完全一致的 `CALL_RECORD_NOT_FOUND`。

@@ -19,6 +19,17 @@ export interface ApiErrorBody {
   message: string
 }
 
+/**
+ * 管理端登录态（需求 12.8）。
+ *
+ * 未登录时 username 为 null —— 会话查询接口是公开的，服务端刻意不在未登录时
+ * 透露配置好的管理员用户名。
+ */
+export interface Session {
+  authenticated: boolean
+  username: string | null
+}
+
 /** 网关派生状态（需求 FR-01）。不落库，服务端每次实时计算。 */
 export type GatewayStatus = 'EMPTY' | 'READY' | 'DEGRADED' | 'UNAVAILABLE'
 

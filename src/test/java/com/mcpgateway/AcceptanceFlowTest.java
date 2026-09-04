@@ -49,6 +49,7 @@ class AcceptanceFlowTest {
     @DynamicPropertySource
     static void registerProperties(DynamicPropertyRegistry registry) {
         registry.add("mcp-gateway.security.master-key", () -> TestMasterKey.BASE64);
+        TestAdminCredentials.register(registry);
     }
 
     @Autowired
@@ -69,6 +70,11 @@ class AcceptanceFlowTest {
     void resetDownstreams() {
         this.mockKbA.reset(List.of("search", "ping"));
         this.mockKbB.reset(List.of("search", "lookup"));
+        /*
+         * 管理 API 现在需要登录（需求 12.8）。这一步也属于"只用对外接口"的验收范围 ——
+         * 走的是浏览器完全相同的一条路：取 CSRF 令牌、登录、带着会话继续。
+         */
+        AdminSession.signIn(this.rest);
     }
 
     @AfterEach

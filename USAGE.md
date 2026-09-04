@@ -44,13 +44,13 @@
 - 一个网关聚合最多 3 个子 MCP（可配），子 MCP 的凭证由网关持有，不下发给 Agent
 - 工具目录同步到本地快照，可以按工具启停、可以覆盖工具描述
 - 每次 `tools/call` 落一条完整调用记录（入参、出参、耗时、状态、trace_id）
-- 一个 Web 管理界面，不需要写配置文件
+- 一个 Web 管理界面，不需要写配置文件；单账号登录保护（凭证来自环境变量）
 - 调用记录可以在界面上按工具、子 MCP、状态、trace_id 和时间范围查，展开看入参与返回
 
 **不能做的**（MVP 明确的边界）
 
 - 只支持 `streamable-http` 传输的下游，**不支持 stdio**（`command`/`args`/`env` 会被明确拒绝）
-- 管理端**没有登录、没有权限系统**，靠网络边界保护
+- 管理端是**单账号身份校验，没有权限系统**：没有角色、没有多账号、改口令要重启
 - 调用记录**没有清理或归档策略**，只在删除网关时级联删除，长期运行会持续增长
 - 令牌轮换没有过渡期，轮换即刻断连
 
@@ -75,17 +75,30 @@ openssl rand -base64 32
 [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Max 256 }))
 ```
 
+### 2.2b 想一个管理端口令
+
+管理界面需要登录（需求 12.8）。口令**至少 12 位**，缺失或过短时网关拒绝启动：
+
+```bash
+openssl rand -base64 18
+```
+
+用户名默认 `admin`，可用 `MCP_GATEWAY_ADMIN_USERNAME` 改。
+与主密钥不同，这个口令不参与任何加解密，忘了换一个新的重启即可 —— 代价是**改口令必须重启**。
+
 ### 2.3 启动
 
 ```bash
-export MCP_GATEWAY_MASTER_KEY='<上一步的密钥>'
+export MCP_GATEWAY_MASTER_KEY='<2.2 生成的密钥>'
+export MCP_GATEWAY_ADMIN_PASSWORD='<2.2b 想好的口令>'
 export MCP_GATEWAY_BASE_URL='http://127.0.0.1:8080'
 mvn spring-boot:run
 ```
 
 ```powershell
-$env:MCP_GATEWAY_MASTER_KEY = '<上一步的密钥>'
-$env:MCP_GATEWAY_BASE_URL   = 'http://127.0.0.1:8080'
+$env:MCP_GATEWAY_MASTER_KEY     = '<2.2 生成的密钥>'
+$env:MCP_GATEWAY_ADMIN_PASSWORD = '<2.2b 想好的口令>'
+$env:MCP_GATEWAY_BASE_URL       = 'http://127.0.0.1:8080'
 mvn spring-boot:run
 ```
 
@@ -96,20 +109,29 @@ mvn -DskipTests package
 java -jar target/mcp-gateway-1.0.0.jar
 ```
 
-启动后浏览器打开 <http://127.0.0.1:8080/>，会跳到网关列表页。
+启动后浏览器打开 <http://127.0.0.1:8080/>，会跳到登录页；登录后落在网关列表页。
 
-> **`MCP_GATEWAY_MASTER_KEY` 没有兜底默认值，不设就启动不来。** 这是刻意的（需求 12.1 / 12.2）：
-> 有兜底值就意味着仓库里躺着一把公开的密钥，子 MCP 凭证用它加密等同于明文落库。
-> `SecurityInvariantsTest.noHardcodedSecrets` 会在构建期断言
-> `application.yml` 里这一行就是 `master-key: ${MCP_GATEWAY_MASTER_KEY:}`。
+> **`MCP_GATEWAY_MASTER_KEY` 和 `MCP_GATEWAY_ADMIN_PASSWORD` 都没有兜底默认值，不设就启动不来。**
+> 这是刻意的（需求 12.1 / 12.2 / 12.8）：有兜底值就意味着仓库里躺着一把公开的钥匙 ——
+> 主密钥那把会让子 MCP 凭证等同于明文落库，口令那把会让所有部署共用同一个弱口令。
+> `SecurityInvariantsTest` 会在构建期断言 `application.yml` 里这两行就是
+> `master-key: ${MCP_GATEWAY_MASTER_KEY:}` 和 `password: ${MCP_GATEWAY_ADMIN_PASSWORD:}`。
 
 ### 2.4 建一个网关
 
-界面上点「新建网关」，或者：
+界面上点「新建网关」，或者用 curl —— 先登录拿一份会话（见 [5.0 认证](#50-认证)）：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/api/gateways \
+# 取 CSRF 令牌 Cookie，再登录；会话 Cookie 也写进同一个 jar
+curl -c jar -b jar -s http://127.0.0.1:8080/api/auth/session > /dev/null
+curl -c jar -b jar -X POST http://127.0.0.1:8080/api/auth/login \
   -H 'Content-Type: application/json' \
+  -H "X-XSRF-TOKEN: $(awk '/XSRF-TOKEN/ {print $7}' jar)" \
+  -d '{"username":"admin","password":"<你的口令>"}'
+
+curl -c jar -b jar -X POST http://127.0.0.1:8080/api/gateways \
+  -H 'Content-Type: application/json' \
+  -H "X-XSRF-TOKEN: $(awk '/XSRF-TOKEN/ {print $7}' jar)" \
   -d '{"name":"知识库网关","slug":"kb","description":"内部文档与知识库工具集合"}'
 ```
 
@@ -347,9 +369,12 @@ Agent 在 `tools/list` 里看到的就是这个值。清除自定义描述会回
 管理界面是 Vue 单页应用（`frontend/`），服务端只把 `/ui/**` 转发给它的入口文档，
 数据全部走 `/api` 下的管理接口。直接访问、刷新、后退都能落到正确的页面上。
 
-前端产物与后端**同源**打进同一个 jar，不做独立部署 —— 管理端没有登录，
-独立部署必须放开的 CORS 会拆掉目前仅有的跨站保护。详见
+前端产物与后端**同源**打进同一个 jar，不做独立部署 —— 独立部署必须放开 CORS，
+而"不发任何 CORS 响应头"和会话 Cookie 的 `SameSite=Strict` 都以同源为前提。详见
 [README 的管理界面一节](README.md#管理界面)。
+
+未登录时访问任何管理页面都会被路由守卫送去 `/ui/login`，登录后回到原本要去的地址。
+守卫是体验不是访问控制 —— 真正的门在每一个 `/api` 请求上。
 
 ---
 
@@ -366,6 +391,42 @@ Agent 在 `tools/list` 里看到的就是这个值。清除自定义描述会回
 ```
 
 三个字段恒定存在。错误响应不含 Java 堆栈，`message` 已脱敏。
+
+**除 5.0 里那两个公开接口外，所有管理接口都需要登录**，未登录一律返回 401 `UNAUTHORIZED`
+（同样是上面这个信封）。下面每个示例都省略了会话相关的参数，实际调用请按 5.0 带上。
+
+### 5.0 认证
+
+| 方法 | 路径 | 是否公开 | 说明 |
+| --- | --- | --- | --- |
+| `GET` | `/api/auth/session` | 公开 | 当前登录态。未登录时 `username` 为 `null`，不透露配置好的用户名 |
+| `POST` | `/api/auth/login` | 公开 | `{"username","password"}`。失败一律 `UNAUTHORIZED`，**不区分**用户名错还是口令错 |
+| `POST` | `/api/auth/logout` | 需登录 | 服务端销毁会话，不只是清 Cookie |
+
+写请求（含登录本身）都要带 CSRF 令牌：服务端下发 `XSRF-TOKEN` Cookie，请求把它原样回填到
+`X-XSRF-TOKEN` 头上。浏览器里这一步由前端的 `client.ts` 自动完成。
+
+用 curl 时先 `GET /api/auth/session` 拿到 Cookie，再登录：
+
+```bash
+# 1) 取 CSRF 令牌 Cookie
+curl -c jar -b jar -s http://127.0.0.1:8080/api/auth/session
+
+# 2) 登录
+curl -c jar -b jar -X POST http://127.0.0.1:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -H "X-XSRF-TOKEN: $(awk '/XSRF-TOKEN/ {print $7}' jar)" \
+  -d '{"username":"admin","password":"<你的口令>"}'
+
+# 3) 此后所有管理接口都带上 -b jar；写请求还要带 X-XSRF-TOKEN
+curl -b jar http://127.0.0.1:8080/api/gateways
+```
+
+登录失败连续 5 次后该来源被锁 5 分钟，返回 429 `TOO_MANY_ATTEMPTS` —— **锁定期间正确口令
+也进不去**。这是刻意的：锁定期间仍然比对一次，就能通过响应时间区分口令对错，限速也就白做了。
+
+> `/mcp/{slug}` 上的 Agent 端点**不受这一节影响**：它仍然只认
+> `Authorization: Bearer <网关访问令牌>`，不需要也不接受会话 Cookie。
 
 ### 5.1 网关
 
@@ -542,7 +603,8 @@ curl http://127.0.0.1:8080/api/gateways
 两点必须知道：
 
 - **列表不含 `requestJson` / `responseJson`。** 那两个字段各可能接近 1 MiB，装的是子 MCP
-  返回的正文；一次几十条带上它们，等于在一个没有登录的接口上成批摊开业务内容。
+  返回的正文；一次几十条带上它们，等于让一次请求就能成批捞走业务内容 ——
+  有了登录也一样，一把被偷走的会话不该等于一次全量导出。
   要看正文只能按 `callId` 取单条。
 - **`statusCounts` 不套用 `status` 参数**，其余筛选条件照常生效。它是给界面做分面切换用的 ——
   已经筛了 `ERROR` 还只显示 `ERROR` 的数量，就没法拿它跳到别的状态。
@@ -559,7 +621,7 @@ curl http://127.0.0.1:8080/api/gateways
 记录**按网关隔离**：拿别的网关的 `callId` 来查，返回和"不存在"完全一致的
 `CALL_RECORD_NOT_FOUND`，不会透露"它存在但属于别人"。
 
-> 这是整个管理 API 里唯一会返回知识库正文的接口，而管理端没有登录 ——
+> 这是整个管理 API 里唯一会返回知识库正文的接口 ——
 > 它的暴露面等同于数据库文件本身，见 [SECURITY.md](SECURITY.md)。
 > 反过来，记录里**不会**有凭证（需求 FR-06.3）。
 
@@ -633,8 +695,11 @@ JSON-RPC `code` 映射：`TOOL_NOT_FOUND` / `TOOL_DISABLED` / `INVALID_TOOL_ARGU
 | 变量 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `MCP_GATEWAY_MASTER_KEY` | **是** | 无 | Base64 编码的 32 字节 AES 主密钥。缺失、不是合法 Base64 或长度不对时**启动失败** |
+| `MCP_GATEWAY_ADMIN_PASSWORD` | **是** | 无 | 管理端登录口令。缺失或**短于 12 位**时**启动失败** |
+| `MCP_GATEWAY_ADMIN_USERNAME` | 否 | `admin` | 管理端登录用户名 |
+| `MCP_GATEWAY_COOKIE_SECURE` | 否 | `false` | 会话 Cookie 是否只在 HTTPS 上下发。做了 TLS 的反代后面**必须设为 `true`**；明文 HTTP 下设成 `true` 会导致 Cookie 不下发、登录不进去 |
 | `MCP_GATEWAY_BASE_URL` | 建议 | `http://127.0.0.1:8080` | 接入 JSON 里的地址。必须是 **Agent 实际能访问到**的地址 |
-| `MCP_GATEWAY_BIND_ADDRESS` | 否 | `127.0.0.1` | 管理端无登录，默认只监听 localhost |
+| `MCP_GATEWAY_BIND_ADDRESS` | 否 | `127.0.0.1` | 默认只监听 localhost。有了登录之后绑内网地址是可选项，但默认值不变 |
 | `MCP_GATEWAY_PORT` | 否 | `8080` | |
 | `MCP_GATEWAY_DB_PATH` | 否 | `./data/mcp-gateway` | H2 文件库路径（不含 `.mv.db` 后缀） |
 | `MCP_GATEWAY_ALLOWED_ORIGINS` | 否 | 空 | 逗号分隔的允许 Origin |
@@ -648,12 +713,16 @@ JSON-RPC `code` 映射：`TOOL_NOT_FOUND` / `TOOL_DISABLED` / `INVALID_TOOL_ARGU
 | `mcp-gateway.base-url` | `http://127.0.0.1:8080` | 见上 |
 | `mcp-gateway.security.master-key` | — | 见上 |
 | `mcp-gateway.security.allowed-origins` | `[]` | 见上 |
+| `mcp-gateway.security.admin.username` | `admin` | 见上 |
+| `mcp-gateway.security.admin.password` | — | 见上，无默认值 |
+| `mcp-gateway.security.cookie-secure` | `false` | CSRF 令牌 Cookie 的 `Secure` 标志，与 `server.servlet.session.cookie.secure` 读同一个环境变量 |
+| `server.servlet.session.timeout` | `30m` | 管理端会话闲置超时 |
 | `mcp-gateway.downstream.call-timeout` | `30s` | 下游 `tools/call` 超时 |
 | `mcp-gateway.downstream.connect-timeout` | `10s` | 下游连接超时 |
 | `mcp-gateway.downstream.max-response-size` | `1048576` | 下游响应体上限，最小 1024 |
 | `mcp-gateway.server.max-request-size` | `1048576` | Agent 请求体上限，最小 1024 |
 | `mcp-gateway.server.max-downstream-per-gateway` | `3` | 每网关子 MCP 上限，最小 1 |
-| `management.endpoints.web.exposure.include` | `health` | **不要放开更多** —— 管理端没有登录 |
+| `management.endpoints.web.exposure.include` | `health` | **不要放开更多**。`health` 是唯一公开的非 UI 路径（容器 healthcheck 依赖），其余路径落在 `denyAll` 上返回 401 |
 
 覆盖方式：环境变量（relaxed binding，如 `MCP_GATEWAY_DOWNSTREAM_CALL_TIMEOUT`）、`-D` 系统属性、或外置 `application.yml`。
 
@@ -683,6 +752,7 @@ java -jar target/mcp-gateway-1.0.0.jar
 
 ```bash
 export MCP_GATEWAY_MASTER_KEY=$(openssl rand -base64 32)
+export MCP_GATEWAY_ADMIN_PASSWORD='<至少 12 位的口令>'
 export MCP_GATEWAY_BASE_URL=http://<Agent 能访问到的地址>:8080
 docker compose up -d --build
 ```
@@ -691,7 +761,7 @@ docker compose up -d --build
 
 1. **容器里必须监听 `0.0.0.0`**（Dockerfile 里已设 `MCP_GATEWAY_BIND_ADDRESS=0.0.0.0`），
    这就放弃了"默认只监听 localhost"那道保护。所以 compose 把端口**只发布到宿主机回环** `127.0.0.1:8080:8080`。
-   改成 `0.0.0.0:8080:8080` 等于把一个**没有登录**的管理端交给整个网络。
+   改成 `0.0.0.0:8080:8080` 之后，挡在整个网络前面的就只剩一个口令了。
 2. **`MCP_GATEWAY_BASE_URL` 必须是 Agent 实际能访问到的地址**，不能是容器内部视角的 `127.0.0.1` ——
    它会原样写进接入 JSON。
 
@@ -722,7 +792,9 @@ docker compose up -d --build
 curl http://127.0.0.1:8080/actuator/health
 ```
 
-只放开了 `health`，且 `show-details: never`。**不要放开其他 actuator 端点** —— 管理端没有登录。
+只放开了 `health`，且 `show-details: never`。**不要放开其他 actuator 端点。**
+`health` 是唯一公开的非 UI 路径（容器 healthcheck 依赖它），其余 actuator 路径落在
+`SecurityConfig` 末尾的 `denyAll` 上返回 401。
 
 ### 9.2 查调用记录
 
@@ -833,35 +905,51 @@ java -jar app.jar --logging.level.com.mcpgateway=DEBUG
 | `DOWNSTREAM_TIMEOUT` | 504 | 下游调用超时 | 超过 `call-timeout`（默认 30s）|
 | `DOWNSTREAM_ERROR` | 502 | 下游返回错误 | |
 | `INTERNAL_ERROR` | 500 | 网关内部错误 | 看服务端日志 |
-| `INVALID_REQUEST` | 400 | 请求体或参数不合法 | 字段校验失败 / 请求体不是合法 JSON / 方法不支持（405）|
+| `INVALID_REQUEST` | 400 | 请求体或参数不合法 | 字段校验失败 / 请求体不是合法 JSON / 方法不支持（405）/ 不是 `application/json`（415）|
 | `ENDPOINT_NOT_FOUND` | 404 | 路径不存在 | |
 | `GATEWAY_NOT_FOUND` | 404 | 网关不存在 | |
 | `DUPLICATE_GATEWAY_SLUG` | 409 | slug 已被占用 | |
 | `DUPLICATE_DOWNSTREAM_NAME` | 409 | 网关内子 MCP 名称重复 | |
 | `DOWNSTREAM_NOT_FOUND` | 404 | 子 MCP 不存在 | |
-| `UNAUTHORIZED` | 401 | 访问令牌缺失或不正确 | |
+| `UNAUTHORIZED` | 401 | 网关访问令牌缺失或不正确；管理端未登录或会话已过期 | |
+| `FORBIDDEN` | 403 | 已登录但请求被拒 | 目前只有一个来源：CSRF 令牌缺失或不匹配，刷新页面重取 |
 | `PAYLOAD_TOO_LARGE` | 413 | 请求体或下游响应体超上限 | 默认各 1 MiB |
+| `TOO_MANY_ATTEMPTS` | 429 | 登录失败次数过多，该来源被临时锁定 | 连续 5 次失败锁 5 分钟 |
 
 ---
 
 ## 11. 边界与已知限制
 
-### 11.1 管理端没有任何认证
+### 11.1 登录是单账号身份校验，不是权限体系
 
-这是需求设定的边界（不含权限系统），不是实现缺陷，但部署时必须当真：
+需求 3.2 不含权限系统。这里有的是一个口令，没有的是角色、多账号和审计追责：
 
-- 默认只监听 `127.0.0.1`
-- 容器部署会破坏这一条，所以 compose 只把端口发布到宿主机回环
-- actuator 只放开 `/actuator/health`，`show-details: never`
+- 凭证只来自环境变量，没有默认值，缺失或短于 12 位时**启动失败**
+- **改口令要重启**，界面上没有改密入口，也没有找回密码通道
+- 登录失败按来源 IP 限速：连续 5 次锁 5 分钟，锁定期间不比对口令。
+  **反向代理后面所有请求的来源 IP 相同**，此时限速会退化成全局的
+- 会话存在服务端内存里，**重启即全部掉线**，闲置 30 分钟超时
+- 默认仍只监听 `127.0.0.1`；容器部署会破坏这一条，所以 compose 只把端口发布到宿主机回环
 
-### 11.2 管理 API 没有 CSRF 令牌
+`/mcp/**` 上的 Agent 链路**完全不受登录影响**：它走单独一条无状态的过滤器链，
+仍然只认网关访问令牌，不种 Cookie、不查 CSRF 令牌。
 
-同源、无登录、无会话，因此没有传统意义的 CSRF 令牌可放。当前挡住跨站请求的是两点：
+### 11.2 CSRF：加了会话 Cookie 才有的攻击面
 
-1. 所有管理接口**只接受 `application/json`** —— 跨站 `<form>` 只能提交 `application/x-www-form-urlencoded` 等简单类型，请求体解析会失败
-2. **没有配置任何 CORS 响应头** —— 跨站 `fetch` 的预检拿不到许可
+会话 Cookie 会被浏览器自动带上，跨站发起的请求因此有了身份 —— 这是登录带来的新攻击面。
+现在是四层：
 
-**这层保护很容易被无意破坏。** 给任何接口加 `@CrossOrigin`、注册 `addCorsMappings`、或让接口接受表单编码，都会打开缺口。`SecurityInvariantsTest.noCorsIsEnabled` 会在构建期拦住前两种。
+1. 会话 Cookie 是 **`SameSite=Strict`**（主力，管理端没有从外站跳进来的正当场景）
+2. 写请求校验 **CSRF 令牌**（`XSRF-TOKEN` Cookie + `X-XSRF-TOKEN` 请求头，登录时轮换）
+3. 所有管理接口**只接受 `application/json`** —— 跨站 `<form>` 只能提交表单编码，会被 415 挡住
+4. **没有配置任何 CORS 响应头** —— 跨站 `fetch` 的预检拿不到许可
+
+**这些保护很容易被无意破坏。** 给任何接口加 `@CrossOrigin`、注册 `addCorsMappings`、
+让接口接受表单编码、或把 `.csrf(...disable)` 从 Agent 链复制到管理端链，都会打开缺口。
+`SecurityInvariantsTest` 里有四条断言分别在构建期守着它们。
+
+界面上偶尔出现 `FORBIDDEN`（HTTP 403）就是 CSRF 令牌过期，刷新页面重取即可 ——
+它和 `UNAUTHORIZED`（该重新登录）刻意分成两个错误码。
 
 ### 11.3 其他限制
 

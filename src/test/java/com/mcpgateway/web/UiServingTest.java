@@ -1,5 +1,6 @@
 package com.mcpgateway.web;
 
+import com.mcpgateway.TestAdminCredentials;
 import com.mcpgateway.TestMasterKey;
 import com.mcpgateway.downstream.MockDownstreamConfig;
 import org.junit.jupiter.api.DisplayName;
@@ -41,6 +42,7 @@ class UiServingTest {
     @DynamicPropertySource
     static void registerProperties(DynamicPropertyRegistry registry) {
         registry.add("mcp-gateway.security.master-key", () -> TestMasterKey.BASE64);
+        TestAdminCredentials.register(registry);
     }
 
     @Autowired
@@ -80,9 +82,8 @@ class UiServingTest {
         String shell = fetch("/ui/gateways").getBody();
 
         /*
-         * 前端做成同源而不是独立部署，是因为管理端没有登录也没有 CSRF 令牌 ——
-         * 独立部署必须放开 CORS，而"没有任何 CORS 响应头"正是目前仅有的两道
-         * 跨站保护之一（另一道是接口只收 application/json）。
+         * 前端做成同源而不是独立部署：独立部署必须放开 CORS，而"没有任何 CORS 响应头"
+         * 是跨站保护的一层，会话 Cookie 的 SameSite=Strict 也依赖同源。
          * 这里守住的是它的前提：入口文档引用的资源必须全是同源相对路径。
          */
         assertThat(shell).contains("/app/assets/");
@@ -114,9 +115,16 @@ class UiServingTest {
     @DisplayName("需求 12.8：actuator 只放开健康检查，不暴露其他管理端点")
     void onlyHealthEndpointIsExposed() {
         assertThat(fetch("/actuator/health").getStatusCode().value()).isEqualTo(200);
-        assertThat(fetch("/actuator/env").getStatusCode().value()).isEqualTo(404);
-        assertThat(fetch("/actuator/beans").getStatusCode().value()).isEqualTo(404);
-        assertThat(fetch("/actuator/configprops").getStatusCode().value()).isEqualTo(404);
+
+        /*
+         * 加登录之前这两个是 404（端点根本没暴露）；现在先被 SecurityConfig 末尾的
+         * anyRequest().denyAll() 拦下，拿到的是 401。两者都不泄漏任何东西，
+         * 区别只是拦截点从路由层提前到了过滤器链 —— 断言跟着改，是因为它要守的是
+         * "除 health 外一律进不去"，而不是某一个具体状态码。
+         */
+        assertThat(fetch("/actuator/env").getStatusCode().value()).isEqualTo(401);
+        assertThat(fetch("/actuator/beans").getStatusCode().value()).isEqualTo(401);
+        assertThat(fetch("/actuator/configprops").getStatusCode().value()).isEqualTo(401);
     }
 
     /** 入口文档里那个带 hash 的脚本路径。 */

@@ -1,5 +1,7 @@
 package com.mcpgateway.downstream;
 
+import com.mcpgateway.AdminSession;
+import com.mcpgateway.TestAdminCredentials;
 import com.mcpgateway.TestMasterKey;
 import com.mcpgateway.domain.DownstreamMcp;
 import com.mcpgateway.domain.Gateway;
@@ -44,6 +46,7 @@ class ToolSyncIntegrationTest {
     @DynamicPropertySource
     static void registerMasterKey(DynamicPropertyRegistry registry) {
         registry.add("mcp-gateway.security.master-key", () -> TestMasterKey.BASE64);
+        TestAdminCredentials.register(registry);
     }
 
     @LocalServerPort
@@ -78,6 +81,8 @@ class ToolSyncIntegrationTest {
         this.gateway = new Gateway(UUID.randomUUID().toString(), "gw",
                 "sync-" + Long.toString(System.nanoTime(), 36), null, "hash", Instant.now(), Instant.now());
         this.gateways.insert(this.gateway);
+        // syncEndpointReportsOutcome 走的是需要登录的管理 API（需求 12.8）。
+        AdminSession.signIn(this.restTemplate);
     }
 
     private DownstreamMcp createDownstream(String name, String path, Map<String, String> headers) {

@@ -10,6 +10,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -66,6 +67,21 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({ NoHandlerFoundException.class, NoResourceFoundException.class })
     public ResponseEntity<ApiResponse<Void>> handleNotFound(Exception ex) {
         return respond(ErrorCode.ENDPOINT_NOT_FOUND, "no such endpoint");
+    }
+
+    /**
+     * 请求体不是 JSON。
+     *
+     * "管理接口只收 application/json"是 SECURITY.md 里那道跨站保护的第一条：跨站
+     * {@code <form>} 提交只能用表单编码，到这里就被挡住。但没有这个分支的话它会掉进
+     * 兜底的 Exception 处理器变成 500 —— 一个正常的拒绝被报成服务端故障，
+     * 既误导排查，也让"保护生效了"和"服务坏了"在日志里长得一模一样。
+     */
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnsupportedMediaType(
+            HttpMediaTypeNotSupportedException ex) {
+        return ResponseEntity.status(org.springframework.http.HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+                .body(ApiResponse.fail(ErrorCode.INVALID_REQUEST, "only application/json is accepted"));
     }
 
     /** 方法不被支持时返回 405，同样不能落到兜底分支里变成 500。 */

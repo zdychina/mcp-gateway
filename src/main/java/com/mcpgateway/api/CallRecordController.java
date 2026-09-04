@@ -14,7 +14,9 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * MVP 阶段这块是空的，排障只能停掉应用连 H2 查库。补上之后要记住：
  * <b>取单条的接口会返回知识库正文</b>（requestJson / responseJson 按 FR-06.4 原样保存），
- * 而管理端没有登录 —— 这个接口的暴露面等同于数据库文件本身，见 SECURITY.md。
+ * 登录之后它不再是匿名可读，但仍是整个管理 API 里唯一会吐出业务正文的地方：
+ * 一把被偷走的会话在这里能捞到的东西远多于别处，所以列表不带正文的约束继续保留，
+ * 见 SECURITY.md。
  *
  * 只有 GET：调用记录是打点产生的事实，不接受人工增删改。清理策略见 SECURITY.md 的已知限制。
  */

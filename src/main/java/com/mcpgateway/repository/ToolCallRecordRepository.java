@@ -140,7 +140,7 @@ public class ToolCallRecordRepository {
      *
      * 刻意不含 request_json / response_json —— 它们按 FR-06.4 原样保存且不截断，
      * 装的是知识库返回的正文。列表一次几十条，把 CLOB 一起捞出来既拖垮响应体，
-     * 也把大量业务内容摊在一个没有登录的接口上。正文只能按 callId 单条取。
+     * 也让一次请求就能成批捞走业务内容。正文只能按 callId 单条取。
      */
     private static final String SUMMARY_COLUMNS = """
             call_id, trace_id, gateway_id, downstream_mcp_id, exposed_tool_name, original_tool_name,

@@ -5,10 +5,10 @@ import vue from '@vitejs/plugin-vue'
 /*
  * 关键取舍：产物同源打进 Spring Boot，而不是独立部署。
  *
- * 管理端没有登录、没有会话、没有 CSRF 令牌。目前挡住跨站请求的只有两点：
- * 接口只收 application/json，以及一个 CORS 响应头都没有。真做成前后端分离部署，
- * 就必须放开 CORS，那层保护会直接消失（SecurityInvariantsTest.noCorsIsEnabled
- * 正是为此在构建期把关）。
+ * 管理端有登录、有会话 Cookie、有 CSRF 令牌，但挡住跨站请求的仍有一层是"同源"：
+ * 服务端一个 CORS 响应头都不发。真做成前后端分离部署就必须放开 CORS，那一层会直接消失
+ * （SecurityInvariantsTest.noCorsIsEnabled 正是为此在构建期把关），
+ * 会话 Cookie 的 SameSite=Strict 也会连带失效 —— 跨源请求根本带不上它。
  *
  * 所以：开发期用下面的 proxy 让浏览器看到的始终是同源；生产期产物落进
  * static/app/ 随 jar 一起发布。两种形态都不需要 CORS。
