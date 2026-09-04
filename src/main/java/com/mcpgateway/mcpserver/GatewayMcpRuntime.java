@@ -47,7 +47,7 @@ public final class GatewayMcpRuntime implements AutoCloseable {
                 delegate -> new GatewayMcpHandler(delegate, gateway.id(), gateway.slug(), router, recorder));
 
         this.server = McpServer.sync(capturing)
-                .serverInfo("mcp-gateway-" + gateway.slug(), "0.1.0")
+                .serverInfo("mcp-gateway-" + gateway.slug(), "1.0.0")
                 // 需求 6.1.4：网关描述映射为 initialize 结果里的 instructions
                 .instructions(gateway.description())
                 .capabilities(McpSchema.ServerCapabilities.builder().tools(true).build())

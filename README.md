@@ -114,9 +114,9 @@ mvn -Psecurity verify -Dnvd.api.key=<你的 NVD API Key>
 发版按这个顺序，**先改版本再打标签**：
 
 ```bash
-mvn versions:set -DnewVersion=0.1.0 -DgenerateBackupPoms=false   # 去掉 -SNAPSHOT
-git commit -am "发布 0.1.0" && git push
-git tag v0.1.0 && git push origin v0.1.0
+mvn versions:set -DnewVersion=1.0.0 -DgenerateBackupPoms=false   # 去掉 -SNAPSHOT
+git commit -am "发布 1.0.0" && git push
+git tag v1.0.0 && git push origin v1.0.0
 ```
 
 标签构建通过后，会用**同一份已过门禁的 jar**（不重新构建）建一个 GitHub Release，

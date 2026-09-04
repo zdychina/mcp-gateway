@@ -74,7 +74,7 @@ public class DownstreamClientFactory {
                 .requestTimeout(config.getCallTimeout())
                 .initializationTimeout(config.getCallTimeout())
                 // SDK 默认上报的 clientInfo 版本号是过期的，显式声明便于子 MCP 侧识别来访者。
-                .clientInfo(new McpSchema.Implementation("mcp-gateway", "MCP Aggregation Gateway", "0.1.0"))
+                .clientInfo(new McpSchema.Implementation("mcp-gateway", "MCP Aggregation Gateway", "1.0.0"))
                 .build();
     }
 

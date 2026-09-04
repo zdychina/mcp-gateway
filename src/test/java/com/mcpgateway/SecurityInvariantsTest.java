@@ -147,7 +147,7 @@ class SecurityInvariantsTest {
 
         /*
          * 只检查 <version> 元素本身，不能整份文件扫 "SNAPSHOT" ——
-         * 项目自己的版本就是 0.1.0-SNAPSHOT，那是预发布的正常形态，
+         * 项目自己的版本在开发期是 -SNAPSHOT，那是预发布的正常形态，
          * 要防的是**依赖**用了动态版本。SNAPSHOT 依赖另有 enforcer 的
          * requireReleaseDeps 在构建期拦截。
          */

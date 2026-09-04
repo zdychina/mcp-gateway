@@ -1,7 +1,7 @@
 services:
   mcp-gateway:
     build: .
-    image: mcp-gateway:0.1.0
+    image: mcp-gateway:1.0.0
     container_name: mcp-gateway
     restart: unless-stopped
 

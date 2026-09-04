@@ -93,7 +93,7 @@ mvn spring-boot:run
 
 ```bash
 mvn -DskipTests package
-java -jar target/mcp-gateway-0.1.0-SNAPSHOT.jar
+java -jar target/mcp-gateway-1.0.0.jar
 ```
 
 启动后浏览器打开 <http://127.0.0.1:8080/>，会跳到网关列表页。
@@ -676,7 +676,7 @@ H2 文件库，单机单进程（`AUTO_SERVER=FALSE`）。Flyway 在启动时自
 mvn -DskipTests package
 MCP_GATEWAY_MASTER_KEY='<key>' \
 MCP_GATEWAY_BASE_URL='http://127.0.0.1:8080' \
-java -jar target/mcp-gateway-0.1.0-SNAPSHOT.jar
+java -jar target/mcp-gateway-1.0.0.jar
 ```
 
 ### 8.2 Docker Compose

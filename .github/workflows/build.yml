@@ -94,10 +94,10 @@ jobs:
         with:
           name: mcp-gateway-jar-${{ github.sha }}
 
-      # pom 的版本是 0.1.0-SNAPSHOT，而 enforcer 的 requireReleaseDeps 只管依赖和
+      # pom 的版本在发版前是 -SNAPSHOT，而 enforcer 的 requireReleaseDeps 只管依赖和
       # 父 pom，管不到项目自身版本 —— 也就是说带着 -SNAPSHOT 打标签，构建照样是绿的。
-      # 那样发出去的 Release 资产会叫 mcp-gateway-0.1.0-SNAPSHOT.jar，jar 内部的
-      # MANIFEST 版本也是 SNAPSHOT，和 v0.1.0 这个标签对不上。
+      # 那样发出去的 Release 资产会叫 mcp-gateway-<版本>-SNAPSHOT.jar，jar 内部的
+      # MANIFEST 版本也是 SNAPSHOT，和 v<版本> 这个标签对不上。
       #
       # 所以这里挡一道：jar 的版本必须和标签一致。发版流程是**先改 pom 版本、
       # 提交，再打标签**。版本号直接从产物文件名取，不用再解析一次 pom。
