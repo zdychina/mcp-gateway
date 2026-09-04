@@ -55,3 +55,70 @@ export function formatRelative(iso: string | null | undefined, now: number = Dat
   }
   return formatDateTime(iso)
 }
+
+/**
+ * 带秒的绝对时间，形如 2026-08-31 14:05:09。
+ *
+ * 调用记录排障要按秒对齐日志，分钟级精度不够 —— 一秒内几十次调用是常态。
+ */
+export function formatExact(iso: string | null | undefined): string {
+  const date = toDate(iso)
+  if (!date) {
+    return '—'
+  }
+  return `${formatDateTime(iso)}:${pad(date.getSeconds())}`
+}
+
+/** 只有时钟部分，形如 14:05:09。 */
+export function formatClock(iso: string | number | null | undefined): string {
+  const date = toDate(iso)
+  if (!date) {
+    return '—'
+  }
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+/**
+ * 列表时间戳：当天只给时分秒，跨天才补上日期。
+ *
+ * 一页 20 条大多落在同一天，每行都重复年月日会把真正在变的那部分（秒）淹掉。
+ */
+export function formatStamp(iso: string | null | undefined, now: number = Date.now()): string {
+  const date = toDate(iso)
+  if (!date) {
+    return '—'
+  }
+  const today = new Date(now)
+  const sameDay = date.getFullYear() === today.getFullYear()
+    && date.getMonth() === today.getMonth()
+    && date.getDate() === today.getDate()
+  const clock = formatClock(iso)
+  return sameDay ? clock : `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${clock}`
+}
+
+/**
+ * ISO instant → `<input type="datetime-local">` 认识的本地时间串。
+ *
+ * 反向转换在 CallRecordsView 里（toInstant）：URL 上存 instant，输入框里是本地时间，
+ * 两边必须用同一套换算，否则把链接发给另一个时区的同事会看到错开的窗口。
+ */
+export function toLocalInput(iso: string | null | undefined): string {
+  const date = toDate(iso)
+  if (!date) {
+    return ''
+  }
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    + `T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function pad(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
+function toDate(value: string | number | null | undefined): Date | null {
+  if (value === null || value === undefined || value === '') {
+    return null
+  }
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}

@@ -26,6 +26,14 @@
       管理前端（frontend/）。同样按需求 13.3 固定版本：Node 版本写死在这里，
       npm 依赖由 frontend/package-lock.json 锁定，构建走 `npm ci` 而不是 `npm install`。
     -->
+    <!--
+      Apache POI，只用于管理端的「导出 Excel」（需求 FR-06.5 的衍生功能）。
+      同样按需求 13.3 固定版本 —— Spring Boot 的 BOM 不管这个坐标，不写死就会随
+      仓库里的最新版漂移。它带进来的 xmlbeans / commons-compress 也在
+      -Psecurity 那条 dependency-check 流水线的扫描范围内。
+    -->
+    <poi.version>5.4.1</poi.version>
+
     <node.version>v24.15.0</node.version>
     <frontend-maven-plugin.version>1.15.1</frontend-maven-plugin.version>
     <!--
@@ -105,6 +113,13 @@
       <groupId>org.flywaydb</groupId>
       <artifactId>flyway-core</artifactId>
     </dependency>
+    <!-- 导出 Excel。只在管理 API 的导出接口里用到，运行时不参与 MCP 转发链路。 -->
+    <dependency>
+      <groupId>org.apache.poi</groupId>
+      <artifactId>poi-ooxml</artifactId>
+      <version>${poi.version}</version>
+    </dependency>
+
     <dependency>
       <groupId>com.h2database</groupId>
       <artifactId>h2</artifactId>

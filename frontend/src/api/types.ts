@@ -183,6 +183,20 @@ export interface RotatedToken {
 
 // ---------------------------------------------------------------- 调用记录
 
+/**
+ * 一个抽取列的取值结果（列表可配置列）。
+ *
+ * 抽不到值有好几种原因，界面上要能分开 —— "路径写错了"和"这条正文太大没解析"
+ * 该做的下一步完全不同，只画一个"—"等于把这个判断推给操作人。
+ */
+export interface ExtractedValue {
+  /** state 不是 OK 时为 null */
+  value: string | null
+  state: 'OK' | 'MISSING' | 'NOT_JSON' | 'TOO_LARGE'
+  /** 值超过 200 字符被截断 */
+  truncated: boolean
+}
+
 /** 调用记录的终态。STARTED 是进行中，或进程异常退出遗留的残留。 */
 export type CallStatus = 'STARTED' | 'SUCCESS' | 'ERROR' | 'TIMEOUT'
 
@@ -206,6 +220,11 @@ export interface CallRecordSummary {
   startedAt: string
   finishedAt: string | null
   durationMs: number | null
+  /**
+   * 按 extract 参数抽出来的正文字段，键就是请求里给的路径（如 `request:/q`）。
+   * 没要求抽取时是空对象 —— 字段恒在，不用判断有没有这个键。
+   */
+  extracted: Record<string, ExtractedValue>
 }
 
 /** 单条记录的完整内容。requestJson / responseJson 是原始 JSON 文本，可能很大。 */
@@ -236,4 +255,9 @@ export interface CallRecordFilters {
   to?: string
   page?: number
   size?: number
+  /**
+   * 要在列表上额外显示的正文字段，形如 `request:/q`、`response:/content/0/text`。
+   * 最多 4 个；服务端只回抽到的值（每个最长 200 字符），正文本身仍然不进列表。
+   */
+  extract?: string[]
 }

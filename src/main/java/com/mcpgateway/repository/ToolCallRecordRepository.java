@@ -7,6 +7,10 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import java.io.IOException;
+import java.io.Reader;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -280,6 +284,91 @@ public class ToolCallRecordRepository {
         }
 
         return " WHERE " + String.join("\n   AND ", conditions);
+    }
+
+    // ------------------------------------------------ 抽取列（需求 FR-06.5）
+
+    /**
+     * 列表抽取列要用的正文切片。
+     *
+     * <p>正文<b>不会</b>整条读进来：读到上限就停，只留一个"太大了"的结论。
+     * 所以这个 record 的内存占用有明确的天花板，见
+     * {@link com.mcpgateway.service.CallPayloadExtractor#MAX_PAYLOAD_CHARS}。
+     *
+     * @param requestTooLarge  入参超过上限，没有读进来
+     * @param responseTooLarge 返回超过上限，没有读进来
+     */
+    public record PayloadSlice(String callId, String requestJson, boolean requestTooLarge,
+            String responseJson, boolean responseTooLarge) {
+    }
+
+    /**
+     * 取一页记录的正文，供抽取列使用。
+     *
+     * <p>刻意做成<b>独立的第二次查询</b>而不是往 {@link #SUMMARY_COLUMNS} 里加两列：
+     * 列表投影里没有正文这条约束依旧成立（SECURITY.md），要读正文就必须显式走这里，
+     * 而且带着 gateway_id 一起过滤 —— 抽取列不能成为绕开网关隔离的旁路。
+     *
+     * @param maxChars 单个字段参与解析的字符上限，超过就只回一个 tooLarge 标记
+     */
+    public Map<String, PayloadSlice> payloadsForExtraction(String gatewayId, List<String> callIds,
+            int maxChars) {
+        if (callIds.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<String, PayloadSlice> slices = new LinkedHashMap<>();
+        this.jdbcClient.sql("""
+                SELECT call_id, request_json, response_json
+                  FROM tool_call_record
+                 WHERE gateway_id = :gatewayId AND call_id IN (:callIds)
+                """)
+                .param("gatewayId", gatewayId)
+                .param("callIds", callIds)
+                .query((rs, rowNum) -> {
+                    // 流必须按列的先后顺序读：有些驱动在读了后面的列之后就不让回头读前面的流了
+                    Capped request = readCapped(rs, "request_json", maxChars);
+                    Capped response = readCapped(rs, "response_json", maxChars);
+                    return slices.put(rs.getString("call_id"), new PayloadSlice(
+                            rs.getString("call_id"),
+                            request.text(), request.tooLarge(),
+                            response.text(), response.tooLarge()));
+                })
+                .list();
+        return slices;
+    }
+
+    /** 读到上限就停下的结果。text 在 tooLarge 时为 null —— 超限的内容一个字符都不留。 */
+    private record Capped(String text, boolean tooLarge) {
+
+        static final Capped ABSENT = new Capped(null, false);
+    }
+
+    /**
+     * 按字符流读一列，最多读 maxChars 个字符。
+     *
+     * <p>不用 {@code rs.getString}：那会把整条 CLOB 拉进内存，而单条正文可能接近 1 MiB，
+     * 一页 100 条就是几百兆。多读一个字符是为了区分"正好到上限"和"还有更多"。
+     */
+    private static Capped readCapped(ResultSet rs, String column, int maxChars) throws SQLException {
+        try (Reader reader = rs.getCharacterStream(column)) {
+            if (reader == null) {
+                return Capped.ABSENT;
+            }
+            char[] buffer = new char[maxChars + 1];
+            int total = 0;
+            while (total < buffer.length) {
+                int read = reader.read(buffer, total, buffer.length - total);
+                if (read < 0) {
+                    break;
+                }
+                total += read;
+            }
+            return total > maxChars ? new Capped(null, true) : new Capped(new String(buffer, 0, total), false);
+        }
+        catch (IOException ex) {
+            throw new SQLException("failed to read " + column, ex);
+        }
     }
 
     /** 需求 15.4.3：记录可以通过 call_id 和 trace_id 唯一关联。 */

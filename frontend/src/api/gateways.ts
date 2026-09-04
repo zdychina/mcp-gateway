@@ -81,6 +81,13 @@ export const callRecordApi = {
   search: (gatewayId: string, filters: CallRecordFilters = {}) => {
     const params = new URLSearchParams()
     for (const [key, value] of Object.entries(filters)) {
+      // 数组（extract）重复传，不拼成一个逗号串 —— 值里本来就可能有逗号
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          params.append(key, item)
+        }
+        continue
+      }
       // 空串和 undefined 都不发 —— 服务端把空串当成"没筛"，但少发一个参数更干净
       if (value !== undefined && value !== null && value !== '') {
         params.set(key, String(value))
@@ -88,6 +95,33 @@ export const callRecordApi = {
     }
     const query = params.toString()
     return http.get<CallRecordPage>(`${base(gatewayId)}/call-records${query ? '?' + query : ''}`)
+  },
+
+  /**
+   * 导出当前筛选结果为 .xlsx。
+   *
+   * 列由调用方给：columns 是有序的列名（含 `request:/q` 这种抽取列），labels 是对应的表头。
+   * 服务端最多导 5000 行，是否截断看 X-Export-Truncated 响应头。
+   */
+  exportFile: (gatewayId: string, filters: CallRecordFilters = {},
+    columns: string[] = [], labels: string[] = []) => {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(filters)) {
+      // 导出接口没有 extract / page / size —— 列本身就带着抽取路径，行数由服务端上限决定
+      if (key === 'extract' || key === 'page' || key === 'size') {
+        continue
+      }
+      if (value !== undefined && value !== null && value !== '') {
+        params.set(key, String(value))
+      }
+    }
+    for (const column of columns) {
+      params.append('columns', column)
+    }
+    for (const label of labels) {
+      params.append('labels', label)
+    }
+    return http.download(`${base(gatewayId)}/call-records/export?${params.toString()}`)
   },
 
   /** 取单条的完整内容，含入参和返回正文。 */

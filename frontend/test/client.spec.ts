@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, http, setUnauthorizedHandler } from '../src/api/client'
+import { callRecordApi } from '../src/api/gateways'
 
 function respondWith(body: unknown, status = 200): void {
   vi.stubGlobal('fetch', vi.fn(async () => ({
@@ -129,5 +130,91 @@ describe('会话失效的处理', () => {
     await expect(http.post('/api/gateways', {})).rejects.toBeInstanceOf(ApiError)
 
     expect(onUnauthorized).not.toHaveBeenCalled()
+  })
+})
+
+describe('下载文件', () => {
+  /** 下载走的是二进制分支，和 JSON 信封那条路不是同一段代码。 */
+  function respondWithFile(): ReturnType<typeof vi.fn> {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'X-Export-Rows': '42',
+        'X-Export-Truncated': 'false'
+      }),
+      blob: async () => new Blob(['xlsx'])
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it('把筛选条件和列一起拼进查询串', async () => {
+    const fetchMock = respondWithFile()
+
+    await callRecordApi.exportFile('gw 1', { status: 'ERROR', toolName: 'kb_a__' },
+      ['startedAt', 'request:/q'], ['开始时间', '查询词'])
+
+    const url = new URL(fetchMock.mock.calls[0][0] as string, 'http://localhost')
+    expect(url.pathname).toBe('/api/gateways/gw%201/call-records/export')
+    expect(url.searchParams.get('status')).toBe('ERROR')
+    expect(url.searchParams.getAll('columns')).toEqual(['startedAt', 'request:/q'])
+    // 中文表头由 URLSearchParams 按 UTF-8 百分号编码，服务端才不会收到乱码
+    expect(url.searchParams.getAll('labels')).toEqual(['开始时间', '查询词'])
+  })
+
+  it('分页和抽取参数不发给导出接口 —— 导的是筛选结果不是某一页', async () => {
+    const fetchMock = respondWithFile()
+
+    await callRecordApi.exportFile('gw-1',
+      { status: 'ERROR', page: 3, size: 100, extract: ['request:/q'] }, ['status'], ['状态'])
+
+    const url = new URL(fetchMock.mock.calls[0][0] as string, 'http://localhost')
+    expect(url.searchParams.has('page')).toBe(false)
+    expect(url.searchParams.has('size')).toBe(false)
+    expect(url.searchParams.has('extract')).toBe(false)
+  })
+
+  it('返回 blob 和响应头，调用方要靠头判断有没有被截断', async () => {
+    respondWithFile()
+
+    const { blob, headers } = await callRecordApi.exportFile('gw-1')
+
+    expect(blob.size).toBeGreaterThan(0)
+    expect(headers.get('X-Export-Rows')).toBe('42')
+  })
+
+  /*
+   * 服务端在开始写文件之前校验参数，失败时回的仍然是 JSON 信封。
+   * 不按内容类型分流的话，一个 400 会被当成一份 0 字节的 Excel 存到磁盘上。
+   */
+  it('服务端回 JSON 错误时抛 ApiError，而不是存下一个坏文件', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false,
+      status: 400,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
+      json: async () => ({
+        success: false, data: null,
+        error: { code: 'INVALID_REQUEST', message: 'unknown column: nope' }
+      }),
+      blob: async () => new Blob(['should not be used'])
+    })))
+
+    await expect(callRecordApi.exportFile('gw-1', {}, ['nope'], ['x']))
+      .rejects.toSatisfy((error: unknown) =>
+        error instanceof ApiError && error.code === 'INVALID_REQUEST')
+  })
+
+  it('HTTP 200 但回的是 JSON，同样按错误处理', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'Content-Type': 'application/json;charset=UTF-8' }),
+      json: async () => ({ success: false, data: null, error: { code: 'INTERNAL_ERROR', message: '' } }),
+      blob: async () => new Blob([''])
+    })))
+
+    await expect(callRecordApi.exportFile('gw-1')).rejects.toBeInstanceOf(ApiError)
   })
 })

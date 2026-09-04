@@ -578,6 +578,7 @@ curl http://127.0.0.1:8080/api/gateways
 | `to` | 结束时间，ISO-8601 instant，**不含** |
 | `page` | 页码，从 0 开始，默认 0 |
 | `size` | 每页条数，默认 20，**上限 100**（超了收敛到 100，响应里的 `size` 说明实际用了多少） |
+| `extract` | 在列表上额外显示的**正文字段**，形如 `request:/q`、`response:/content/0/text`。最多 4 个，可重复传也可用逗号分隔。见下面的「正文列」 |
 
 ```json
 {
@@ -590,7 +591,8 @@ curl http://127.0.0.1:8080/api/gateways
         "originalToolName": "search", "status": "SUCCESS",
         "errorCode": null, "errorMessage": null,
         "startedAt": "2026-08-31T09:00:00Z", "finishedAt": "2026-08-31T09:00:00.120Z",
-        "durationMs": 120
+        "durationMs": 120,
+        "extracted": {}
       }
     ],
     "page": 0, "size": 20, "total": 137,
@@ -605,12 +607,99 @@ curl http://127.0.0.1:8080/api/gateways
 - **列表不含 `requestJson` / `responseJson`。** 那两个字段各可能接近 1 MiB，装的是子 MCP
   返回的正文；一次几十条带上它们，等于让一次请求就能成批捞走业务内容 ——
   有了登录也一样，一把被偷走的会话不该等于一次全量导出。
-  要看正文只能按 `callId` 取单条。
+  要看正文只能按 `callId` 取单条，或者用下面的 `extract` 点名要其中一两个字段。
 - **`statusCounts` 不套用 `status` 参数**，其余筛选条件照常生效。它是给界面做分面切换用的 ——
   已经筛了 `ERROR` 还只显示 `ERROR` 的数量，就没法拿它跳到别的状态。
 
 非法的 `status`、`from`、`to`、负数 `page` 一律返回 `INVALID_REQUEST`，**不静默忽略** ——
 静默忽略会让你以为"筛出来就这些"，而实际上根本没筛。
+
+##### 正文列：`extract`
+
+排障时最想在列表上直接看到的往往是正文里的一两个字段（"这次问的是什么"、"返回的头一段是什么"），
+逐条展开去找非常慢。`extract` 让调用方点名要哪几个字段，服务端按
+[JSON Pointer](https://www.rfc-editor.org/rfc/rfc6901) 抽值：
+
+```bash
+curl -G 'http://127.0.0.1:8080/api/gateways/<网关ID>/call-records' \
+  --data-urlencode 'extract=request:/q' \
+  --data-urlencode 'extract=response:/content/0/text'
+```
+
+抽到的值放在每条记录的 `extracted` 里，键就是请求里给的那个字符串：
+
+```json
+"extracted": {
+  "request:/q": { "value": "制度条款在哪一章", "state": "OK", "truncated": false },
+  "response:/content/0/text": { "value": null, "state": "TOO_LARGE", "truncated": false }
+}
+```
+
+`state` 把"抽不到"的几种原因分开 —— 它们要做的下一步完全不同：
+
+| state | 含义 |
+| --- | --- |
+| `OK` | 抽到了。`truncated` 为 true 表示值超过 200 字符被截断，全文要展开单条看 |
+| `MISSING` | 正文为空，或这条记录里没有这个路径。不同工具的参数结构本来就不一样，这是常态 |
+| `NOT_JSON` | 正文不是合法 JSON（打点时序列化失败写下的 `{"_unserializable":true}`，或历史遗留的坏数据） |
+| `TOO_LARGE` | 正文超过 64 KB，服务端没有读它。要看内容只能取单条 |
+
+几条硬边界：
+
+- **只回抽到的值，不回正文。** 每个值最长 200 字符，一次最多 4 个字段。
+  正文本身在任何情况下都不会出现在列表响应里。
+- **必须显式请求。** 不带 `extract` 时行为和这个参数存在之前完全一致，`extracted` 是 `{}`。
+- **路径写错直接报 `INVALID_REQUEST`**，不是给你一整列空白 ——
+  静默忽略会让人对着一列"—"以为是数据里没有这个字段。
+  来源只能是 `request` 或 `response`，路径必须以 `/` 开头（留空表示整个文档，相当于一个截断的预览）。
+
+管理界面的「列」菜单就是这个参数的入口：勾选要显示的内置列、用 ↑↓ 调顺序、加正文列。
+配置按网关存在浏览器本地（localStorage）—— 抽取路径是跟着工具的参数结构走的，
+`/q` 在这个网关有意义，换个网关很可能什么都抽不到。
+
+#### `GET /api/gateways/{id}/call-records/export` — 导出 Excel
+
+把**当前筛选结果**导成一个 `.xlsx`。筛选参数与列表接口完全一致（`page` / `size` / `extract`
+在这里没有意义，不接受）。
+
+| 参数 | 说明 |
+| --- | --- |
+| `columns` | 要导出的列，按顺序，可重复传。内置列用字段名（`startedAt`、`exposedToolName`、`downstream`、`originalToolName`、`status`、`durationMs`、`errorCode`、`errorMessage`、`finishedAt`、`traceId`、`callId`）；带冒号的按抽取列处理，语义与列表接口的 `extract` 相同。不给就导全部内置列 |
+| `labels` | 表头文案，与 `columns` 一一对应。给了就必须数量相同，否则 `INVALID_REQUEST` —— 数量对不上会让整张表的表头错位 |
+
+```bash
+curl -G -OJ 'http://127.0.0.1:8080/api/gateways/<网关ID>/call-records/export' \
+  --data-urlencode 'status=ERROR' \
+  --data-urlencode 'columns=startedAt' --data-urlencode 'labels=开始时间' \
+  --data-urlencode 'columns=exposedToolName' --data-urlencode 'labels=聚合工具' \
+  --data-urlencode 'columns=request:/q' --data-urlencode 'labels=查询词'
+```
+
+响应是文件流，不套 `{success,data,error}` 信封；但**参数校验发生在开始写文件之前**，
+所以参数错误仍然是一个正常的 JSON 错误响应，调用方要按 `Content-Type` 分流。
+
+三个响应头说明这次导出的规模：
+
+| 响应头 | 含义 |
+| --- | --- |
+| `X-Export-Total` | 满足筛选条件的总条数 |
+| `X-Export-Rows` | 实际写进文件的行数 |
+| `X-Export-Truncated` | 是否因为上限被截断 |
+
+几条边界：
+
+- **一次最多 5000 行。** 超出就截断，并在上面三个响应头里说清楚 ——
+  静默给一份看着完整的文件，比少给几行糟糕得多。要导全就缩小时间范围分批导。
+- **时间是真正的日期单元格**（格式 `yyyy-mm-dd hh:mm:ss`，Excel 里能排序能筛选），
+  用的是**服务端时区**，时区写在表头里 —— 页面上显示的是浏览器本地时间，两者可能不一致。
+- **单元格一律是文本，不会变成公式。** 导出内容里有 Agent 传来的参数和下游返回的正文，
+  以 `=` `+` `-` `@` 开头的单元格在 CSV 里会被 Excel 当公式执行；这正是这个功能做成 xlsx
+  而不是 CSV 的原因之一（`CallRecordApiTest.exportNeverWritesFormulas` 在构建期把关）。
+- 抽取列抽不到值时：字段不存在留空单元格，正文过大或不是 JSON 会写一句说明，
+  而不是留空 —— 否则看表的人会以为下游返回里真的没这个内容。
+
+管理界面页头的「导出 Excel」按钮就是这个接口，列和表头取自当前的列配置：
+导出来的表和屏幕上看到的是同一张。
 
 #### `GET /api/gateways/{id}/call-records/{callId}` — 单条完整内容
 
@@ -820,12 +909,20 @@ curl 'http://127.0.0.1:8080/api/gateways/<网关ID>/call-records?traceId=<trace-
 # 时间范围，ISO-8601 instant，from 含、to 不含
 curl 'http://127.0.0.1:8080/api/gateways/<网关ID>/call-records?from=2026-08-31T00:00:00Z'
 
+# 在列表上顺带抽出正文里的字段（JSON Pointer，最多 4 个）
+curl -G 'http://127.0.0.1:8080/api/gateways/<网关ID>/call-records' \
+  --data-urlencode 'extract=request:/q'
+
+# 导出当前筛选结果为 Excel（最多 5000 行）
+curl -G -OJ 'http://127.0.0.1:8080/api/gateways/<网关ID>/call-records/export' \
+  --data-urlencode 'status=ERROR'
+
 # 单条完整内容（含入参和返回正文）
 curl 'http://127.0.0.1:8080/api/gateways/<网关ID>/call-records/<callId>'
 ```
 
 **列表接口不返回入参和返回正文** —— 那两个字段各可能接近 1 MiB，装的是知识库内容，
-只能按 `callId` 一条一条取。响应里的 `statusCounts` 是各终态的分布，**不受 `status` 参数影响**，
+只能按 `callId` 一条一条取，或用 `extract` 点名抽其中一两个字段（每个最长 200 字符）。响应里的 `statusCounts` 是各终态的分布，**不受 `status` 参数影响**，
 所以可以拿它做分面切换。
 
 **仍需要直接查库的场景**：跨网关的全局统计（接口按网关隔离），或者要做批量清理。

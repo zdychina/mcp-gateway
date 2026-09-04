@@ -591,6 +591,20 @@ table.table.tools { table-layout: fixed; min-width: 46rem; }
 
 /* ============================================================== 调用记录页 */
 
+/*
+ * 分面条：左边状态分面，右边成功率。
+ *
+ * 两者都来自同一份 statusCounts（不套用 status 筛选），放在同一行才看得出它们是
+ * 同一组数字的两种读法 —— 分面回答"有多少"，成功率回答"要不要紧"。
+ */
+.facet-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-3); flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--border);
+}
+
 .facets { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
 .facet {
   display: inline-flex; align-items: center; gap: var(--sp-2);
@@ -610,28 +624,206 @@ table.table.tools { table-layout: fixed; min-width: 46rem; }
 }
 .facet.active .count { color: inherit; }
 
+/* 选中的分面用状态自己的颜色，和表格里的徽章对得上 */
+.facet-SUCCESS.active { border-color: var(--success); background: var(--success-soft); color: var(--success); }
+.facet-ERROR.active { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
+.facet-TIMEOUT.active { border-color: var(--warning); background: var(--warning-soft); color: var(--warning); }
+.facet-STARTED.active { border-color: var(--info); background: var(--info-soft); color: var(--info); }
+
+.health { display: inline-flex; align-items: baseline; gap: var(--sp-2); white-space: nowrap; }
+.health .label { font-size: .76rem; color: var(--text-subtle); }
+.health strong {
+  font-size: 1.05rem; font-weight: 600;
+  font-variant-numeric: tabular-nums; color: var(--success);
+}
+.health.bad strong { color: var(--warning); }
+.health .small { color: var(--text-muted); }
+
+/* -------------------------------------------------------------- 筛选表单 */
+
+.range-row { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.range-label { font-size: .82rem; font-weight: 500; color: var(--text-muted); margin-right: var(--sp-1); }
+
+/* 快捷时间窗、"全部清除"、正文的原文开关，都是这种轻量胶囊按钮 */
+.chip-btn {
+  padding: .2rem .6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text); font: inherit; font-size: .8rem;
+  cursor: pointer; white-space: nowrap;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+.chip-btn:hover { background: var(--surface-sunken); }
+.chip-btn.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.chip-btn.ghost { border-color: transparent; background: transparent; color: var(--text-muted); }
+.chip-btn.ghost:hover { color: var(--accent); }
+.chip-btn.tiny { padding: .05rem .45rem; font-size: .72rem; }
+
 .filters { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.custom-range { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+
+/* ---------------------------------------------------------- 生效中的条件 */
+
+/*
+ * 翻到第 3 页时筛选表单早滚出视野了，"怎么就这几条"十有八九是忘了自己还开着一个条件。
+ * 所以生效中的条件跟着结果走，就放在表格上沿，并且每条都能单独撤销。
+ */
+.chip-bar {
+  display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--border);
+}
+.chip {
+  display: inline-flex; align-items: center; gap: .3rem;
+  padding: .1rem .2rem .1rem .5rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  font-size: .78rem;
+  max-width: 100%;
+}
+.chip-key { color: var(--text-subtle); }
+.chip-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 16rem; }
+.chip-x {
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: none; cursor: pointer; padding: .15rem;
+  color: var(--text-subtle); border-radius: 50%;
+  transition: color var(--transition), background var(--transition);
+}
+.chip-x:hover { color: var(--danger); background: var(--danger-soft); }
+
+/* ------------------------------------------------------------------ 表格 */
+
+/* 列是可配的，宽度也就不固定了；挤不开时让 .table-wrap 横向滚，不把每一列压到读不了 */
+table.table.records { min-width: 42rem; }
+/*
+ * 这里**不要**给 thead 设非 0 的 top。
+ *
+ * .table-wrap 的 overflow-x: auto 会让 overflow-y 也算成 auto，它因此成了滚动容器，
+ * 但自身没有限高、从来不纵向滚。sticky 于是以它为参照：表头的静态位置就在滚动口顶部，
+ * 一旦要求 top > 0，浏览器只能把表头往下推那么多 —— 直接压在第一行上。
+ * 想让表头真的吸住，得先给 .table-wrap 一个 max-height 让它成为真能滚的区域，
+ * 那是另一件事，不是调一个偏移量能解决的。
+ */
 
 .table.records tbody tr.record { cursor: pointer; }
 .table.records tbody tr.record.open { background: var(--accent-soft); }
+.table.records tbody tr.record.open > td { border-bottom-color: transparent; }
 .table.records td.expander,
-.table.records th.expander { width: 2rem; color: var(--text-subtle); text-align: center; }
-.table.records .expander svg { transition: transform var(--transition); }
-.table.records tr.open .expander svg { transform: rotate(90deg); }
-
-.detail-row > td { background: var(--surface-sunken); padding: 0; }
-.detail-panel { padding: var(--sp-4); display: grid; gap: var(--sp-4); }
-.detail-meta { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
-.detail-meta .label,
-.detail-panel .label {
-  font-size: .74rem; color: var(--text-subtle); display: block;
-  margin-bottom: .15rem; font-weight: 500;
+.table.records th.expander {
+  width: 2.2rem; text-align: center;
+  padding-left: .3rem; padding-right: 0;
 }
+.expander-btn {
+  display: inline-flex; padding: .2rem;
+  border: none; background: none; cursor: pointer;
+  color: var(--text-subtle); border-radius: var(--radius-sm);
+}
+.expander-btn svg { transition: transform var(--transition); }
+.table.records tr.open .expander-btn { color: var(--accent); }
+.table.records tr.open .expander-btn svg { transform: rotate(90deg); }
+
+/* 状态色条：扫一眼就知道哪几行不正常，不用逐行读徽章 */
+.table.records tbody tr.record > td:first-child { box-shadow: inset 3px 0 0 transparent; }
+.table.records tbody tr.st-ERROR > td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
+.table.records tbody tr.st-TIMEOUT > td:first-child { box-shadow: inset 3px 0 0 var(--warning); }
+.table.records tbody tr.st-STARTED > td:first-child { box-shadow: inset 3px 0 0 var(--info); }
+
+.records .col-startedAt,
+.records .col-finishedAt { white-space: nowrap; color: var(--text-muted); }
+.records .col-exposedToolName { min-width: 11rem; }
+.records .tool-name { font-weight: 500; overflow-wrap: anywhere; }
+.records .col-downstream { white-space: nowrap; }
+.records .warn { color: var(--warning); }
+.records .err-code { color: var(--danger); font-weight: 600; font-size: .76rem; }
+
+/* 截断放在 span 上而不是 td 上：自动列宽按内容的最大宽度算，
+   只有子元素自己有 max-width，一条长错误摘要或一段抽出来的正文才不会把整列撑开 */
+.records .clamp,
+.records .extract-value {
+  display: inline-block; max-width: 20rem; vertical-align: bottom;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.records .extract-value { max-width: 16rem; }
+.records .extract-empty { font-size: .78rem; }
+
+/* 耗时条按本页最大值归一，慢的那几条不用读数字就能挑出来 */
+.records .col-durationMs { white-space: nowrap; min-width: 6rem; }
+.records .dur-value { display: block; }
+.records .dur-bar {
+  display: block; height: 3px; margin-top: .25rem;
+  background: var(--border); border-radius: 2px; overflow: hidden;
+}
+.records .dur-fill { display: block; height: 100%; background: var(--accent); opacity: .5; }
+.records .dur-fill.slow { background: var(--warning); opacity: .9; }
+
+.records .col-traceId,
+.records .col-callId { white-space: nowrap; }
+.records .col-traceId .linkish { vertical-align: middle; }
+
+/* 自动刷新带进来的新记录闪一下 —— "最上面多了两行"是很容易漏掉的变化 */
+@keyframes record-fresh {
+  from { background: var(--accent-soft); }
+  to { background: transparent; }
+}
+.table.records tbody tr.record.fresh { animation: record-fresh 2.4s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .table.records tbody tr.record.fresh { animation: none; }
+}
+
+/* 表格和详情面板里的图标按钮（复制 trace_id、复制正文……） */
+.icon-btn {
+  display: inline-flex; align-items: center; gap: .25rem;
+  padding: .15rem .25rem;
+  border: none; background: none; cursor: pointer;
+  color: var(--text-subtle); font: inherit; font-size: .74rem;
+  border-radius: var(--radius-sm); vertical-align: middle;
+  transition: color var(--transition), background var(--transition);
+}
+.icon-btn:hover { color: var(--accent); background: var(--accent-soft); }
+.icon-btn.ok { color: var(--success); }
+.icon-btn.failed { color: var(--warning); }
+
+/* ------------------------------------------------------------ 展开的详情 */
+
+.detail-row > td {
+  background: var(--surface-sunken); padding: 0;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.detail-panel { padding: var(--sp-4); display: grid; gap: var(--sp-4); }
+
+.detail-meta {
+  display: grid; gap: var(--sp-3);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  padding: var(--sp-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.detail-meta .span-all { grid-column: 1 / -1; }
+.detail-meta .value { display: flex; align-items: center; gap: .2rem; overflow-wrap: anywhere; }
+.detail-meta .label,
+.payload .label {
+  display: block; margin-bottom: .15rem;
+  font-size: .74rem; font-weight: 500; color: var(--text-subtle);
+}
+
+/* 入参和返回并排：排障时要做的事就是把这两边对着看 */
+.payloads {
+  display: grid; gap: var(--sp-3);
+  grid-template-columns: repeat(auto-fit, minmax(24rem, 1fr));
+}
+.payload header { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-1); }
+.payload header .label { margin-bottom: 0; }
+.payload .size { font-size: .72rem; color: var(--text-subtle); font-variant-numeric: tabular-nums; }
+.payload-actions { margin-left: auto; display: inline-flex; align-items: center; gap: var(--sp-1); }
 
 /* 正文可能接近 1 MiB，必须限高滚动，否则一条记录能把整页撑到几屏 */
 .json-block {
   margin: 0; padding: var(--sp-3);
-  max-height: 22rem; overflow: auto;
+  max-height: 24rem; overflow: auto;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -641,10 +833,132 @@ table.table.tools { table-layout: fixed; min-width: 46rem; }
   color: var(--text);
 }
 
+/* ------------------------------------------------------------ 页头与分页 */
+
+.refresh-stamp {
+  display: inline-flex; align-items: center; gap: .3rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 下拉框放在按钮行里，高度要和按钮对齐，不能撑满一整列 */
+select.control.control-inline {
+  width: auto; padding: .28rem 1.7rem .28rem .55rem;
+  font-size: .82rem; border-radius: var(--radius);
+}
+
 .pager {
   display: flex; align-items: center; gap: var(--sp-3);
   flex-wrap: wrap; justify-content: space-between;
   border-top: 1px solid var(--border);
+}
+.pager-controls {
+  display: flex; align-items: center; gap: var(--sp-4);
+  flex-wrap: wrap; justify-content: flex-end;
+}
+.page-size { display: inline-flex; align-items: center; gap: var(--sp-2); }
+
+.pager-nav { display: inline-flex; align-items: center; gap: var(--sp-1); }
+
+/* 页码是方块按钮，和两侧"上一页/下一页"的胶囊区分开，扫读时一眼能分出哪些是数字 */
+.page-btn {
+  min-width: 1.9rem; padding: .24rem .4rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit; font-size: .82rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+.page-btn:hover { background: var(--surface-sunken); color: var(--text); }
+.page-btn.current {
+  background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
+  cursor: default;
+}
+
+.page-gap {
+  padding: 0 .1rem; color: var(--text-subtle);
+  font-size: .82rem; user-select: none;
+}
+
+.pager-jump { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.pager-jump label { display: inline-flex; align-items: center; gap: var(--sp-1); }
+/* 输入框只放得下四位数就够：一页 20 条时 9999 页对应 20 万条记录 */
+.pager-jump input.control { width: 4.5rem; text-align: center; }
+
+/* ------------------------------------------------------------------ 列菜单 */
+
+/*
+ * 用原生 details/summary 而不是自己写一个弹层：点外面收起、Esc 收起、Tab 可达，
+ * 全是浏览器白送的，自己写一遍只会写出一个更差的版本。
+ */
+.col-menu { position: relative; }
+.col-menu > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.col-menu > summary::-webkit-details-marker { display: none; }
+.col-menu > summary .count {
+  padding: 0 .35rem; border-radius: var(--radius-pill);
+  background: var(--surface-sunken); border: 1px solid var(--border);
+  color: var(--text-muted); font-size: .72rem; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.col-menu[open] > summary { border-color: var(--accent); color: var(--accent); }
+
+.col-panel {
+  position: absolute; right: 0; top: calc(100% + var(--sp-2)); z-index: 40;
+  width: 24rem; max-width: calc(100vw - 2rem);
+  max-height: 70vh; overflow: auto;
+  padding: var(--sp-3);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  text-align: left;
+}
+
+.col-panel-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  font-size: .78rem; font-weight: 600; color: var(--text-muted);
+  margin-bottom: var(--sp-2);
+}
+
+.col-list { list-style: none; margin: 0 0 var(--sp-3); padding: 0; }
+.col-list li {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: .2rem .25rem; border-radius: var(--radius-sm);
+}
+.col-list li:hover { background: var(--surface-sunken); }
+/* 关掉的列压暗，但仍留在原地 —— 位置固定才好按顺序找 */
+.col-list li.off .col-label { color: var(--text-subtle); }
+.col-list .check { flex: 1; min-width: 0; }
+.col-list .col-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-list .col-path {
+  font-size: .68rem; color: var(--text-subtle);
+  max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.col-list .col-actions { display: inline-flex; align-items: center; gap: .1rem; flex: none; }
+.col-list .icon-btn.danger:hover { color: var(--danger); background: var(--danger-soft); }
+
+.col-add { border-top: 1px solid var(--border); padding-top: var(--sp-3); }
+.col-add-row { display: flex; gap: var(--sp-2); align-items: center; }
+.col-add-row .control { min-width: 0; }
+.col-add-row .control.mono { flex: 1.4; }
+.col-add-row .control:not(.mono):not(.control-inline) { flex: 1; }
+.col-add .hint {
+  margin-top: var(--sp-2);
+  font-size: .74rem; line-height: 1.5; color: var(--text-subtle);
+}
+.col-add .hint.warn { color: var(--warning); }
+.col-add .hint code { font-size: .7rem; }
+
+/* 只给读屏软件的文本：展开列的表头没有可见标题，但不能没有名字 */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
 
 /* 接入 JSON 和导入框都是要整段读的内容，别自动换行打乱缩进 */

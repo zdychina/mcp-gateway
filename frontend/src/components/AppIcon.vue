@@ -18,7 +18,14 @@ const PATHS: Record<string, string> = {
   warning: 'M12 9v4m0 4h.01M10.3 3.9L2.4 17.5A2 2 0 004.1 20.5h15.8a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z',
   search: 'M11 19a8 8 0 100-16 8 8 0 000 16zm10 2l-4.35-4.35',
   lock: 'M7 11V8a5 5 0 0110 0v3M5 11h14a1 1 0 011 1v8a1 1 0 01-1 1H5a1 1 0 01-1-1v-8a1 1 0 011-1z',
-  exit: 'M15 17l5-5-5-5M20 12H9M12 20H6a2 2 0 01-2-2V6a2 2 0 012-2h6'
+  exit: 'M15 17l5-5-5-5M20 12H9M12 20H6a2 2 0 01-2-2V6a2 2 0 012-2h6',
+  copy: 'M10 8h9a1 1 0 011 1v9a1 1 0 01-1 1h-9a1 1 0 01-1-1V9a1 1 0 011-1zM6 15H5a1 1 0 01-1-1V5a1 1 0 011-1h9a1 1 0 011 1v1',
+  check: 'M20 6L9 17l-5-5',
+  refresh: 'M20.5 12a8.5 8.5 0 11-2.5-6M20.5 4.5V10h-5.5',
+  close: 'M6 6l12 12M18 6L6 18',
+  clock: 'M12 7v5l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+  columns: 'M4 5h16v14H4zM10 5v14M16 5v14',
+  download: 'M12 3v12M7 11l5 5 5-5M4 19h16'
 }
 
 const d = computed(() => PATHS[props.name] ?? '')

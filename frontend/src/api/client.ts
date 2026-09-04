@@ -90,8 +90,39 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   return payload.data as T
 }
 
+/**
+ * 下载一个文件。
+ *
+ * 不能走 request()：那个函数只认 {success,data,error} 的 JSON 信封，而这里成功时拿到的是
+ * 二进制流。但**失败时服务端仍然回信封** —— 参数校验发生在开始写文件之前 ——
+ * 所以要按响应的内容类型分流，否则一个 400 会被当成一份 0 字节的 Excel 存到磁盘上。
+ */
+async function download(url: string): Promise<{ blob: Blob, headers: Headers }> {
+  const response = await fetch(url, { headers: { Accept: '*/*' } })
+
+  if (response.status === 401 && !url.startsWith('/api/auth/')) {
+    onUnauthorized?.()
+  }
+
+  const contentType = response.headers.get('Content-Type') ?? ''
+  if (!response.ok || contentType.includes('application/json')) {
+    let payload: ApiResponse<unknown> | null = null
+    try {
+      payload = (await response.json()) as ApiResponse<unknown>
+    }
+    catch {
+      throw new ApiError('INVALID_RESPONSE', `服务端返回了无法解析的响应（HTTP ${response.status}）`)
+    }
+    throw new ApiError(payload?.error?.code ?? `HTTP_${response.status}`,
+      payload?.error?.message ?? '')
+  }
+
+  return { blob: await response.blob(), headers: response.headers }
+}
+
 export const http = {
   get: <T>(url: string) => request<T>('GET', url),
+  download,
   post: <T>(url: string, body?: unknown) => request<T>('POST', url, body),
   put: <T>(url: string, body: unknown) => request<T>('PUT', url, body),
   patch: <T>(url: string, body: unknown) => request<T>('PATCH', url, body),

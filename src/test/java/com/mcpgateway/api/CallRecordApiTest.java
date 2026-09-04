@@ -8,20 +8,34 @@ import com.mcpgateway.domain.SyncStatus;
 import com.mcpgateway.domain.ToolCallRecord;
 import com.mcpgateway.repository.DownstreamMcpRepository;
 import com.mcpgateway.repository.ToolCallRecordRepository;
+import com.mcpgateway.service.CallPayloadExtractor;
+import com.mcpgateway.service.CallRecordService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellType;
+import org.apache.poi.ss.usermodel.DataFormatter;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -47,6 +61,9 @@ class CallRecordApiTest extends AbstractApiTest {
 
     @Autowired
     private DownstreamMcpRepository downstreams;
+
+    @Autowired
+    private JdbcClient jdbcClient;
 
     private String gatewayId;
 
@@ -307,5 +324,340 @@ class CallRecordApiTest extends AbstractApiTest {
         this.mockMvc.perform(get("/api/gateways/no-such-gateway/call-records"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error.code").value("GATEWAY_NOT_FOUND"));
+    }
+
+    // ------------------------------------------------ 抽取列（需求 FR-06.5）
+
+    /*
+     * extract 是"列表不带正文"这条约束上唯一的开口：调用方点名要哪几个字段，
+     * 服务端只回抽到的值。所以这一组用例既要证明它有用，也要证明它没把闸门拆了。
+     */
+
+    /** 写一条带指定正文的记录，用来验证抽取。 */
+    private String recordWithPayload(String requestJson, String responseJson) {
+        String callId = UUID.randomUUID().toString();
+        this.records.insertStarted(ToolCallRecord.started(callId, "t-extract", this.gatewayId,
+                this.downstreamId, "kb_a__search", "search", requestJson, BASE));
+        this.records.complete(callId, CallStatus.SUCCESS, responseJson, null, null,
+                BASE.plusMillis(120), 120);
+        return callId;
+    }
+
+    @Test
+    @DisplayName("按 JSON Pointer 从入参和返回里抽字段到列表上")
+    void extractsConfiguredFieldsFromPayloads() throws Exception {
+        recordWithPayload("{\"q\":\"" + REQUEST_MARKER + "\",\"top\":5}",
+                "{\"content\":[{\"text\":\"" + RESPONSE_MARKER + "\"}]}");
+
+        JsonNode page = search("?extract=request:/q&extract=response:/content/0/text");
+
+        assertThat(page.at("/items/0/extracted/request:~1q/value").asText()).isEqualTo(REQUEST_MARKER);
+        assertThat(page.at("/items/0/extracted/request:~1q/state").asText()).isEqualTo("OK");
+        assertThat(page.at("/items/0/extracted/response:~1content~10~1text/value").asText())
+                .isEqualTo(RESPONSE_MARKER);
+    }
+
+    /** 逗号分隔和重复传参是同一回事 —— 前端拼哪种都不该有区别。 */
+    @Test
+    @DisplayName("extract 可以逗号分隔，也可以重复传")
+    void acceptsBothParameterStyles() throws Exception {
+        recordWithPayload("{\"q\":\"" + REQUEST_MARKER + "\"}", "{\"ok\":true}");
+
+        JsonNode page = search("?extract=request:/q,response:/ok");
+
+        assertThat(page.at("/items/0/extracted/request:~1q/value").asText()).isEqualTo(REQUEST_MARKER);
+        assertThat(page.at("/items/0/extracted/response:~1ok/value").asText()).isEqualTo("true");
+    }
+
+    @Test
+    @DisplayName("不要求抽取时行为和从前完全一致：extracted 是空的")
+    void extractionIsOptIn() throws Exception {
+        recordWithPayload("{\"q\":\"" + REQUEST_MARKER + "\"}", "{\"ok\":true}");
+
+        JsonNode page = search("");
+
+        assertThat(page.at("/items/0/extracted").isObject()).isTrue();
+        assertThat(page.at("/items/0/extracted")).isEmpty();
+    }
+
+    /**
+     * 开了抽取列，正文本身依然不进列表。
+     *
+     * 这条是整个功能的边界：抽取列放出去的是"调用方点名的一个字段、最多 200 字符"，
+     * 而不是把 SECURITY.md 里那条闸门拆掉。
+     */
+    @Test
+    @DisplayName("即使开着抽取列，列表也不返回正文字段本身")
+    void extractionStillNeverCarriesWholePayloads() throws Exception {
+        recordWithPayload("{\"q\":\"" + REQUEST_MARKER + "\",\"secret\":\"" + RESPONSE_MARKER + "\"}",
+                "{\"content\":[{\"text\":\"" + RESPONSE_MARKER + "\"}]}");
+
+        MvcResult result = this.mockMvc.perform(get("/api/gateways/" + this.gatewayId
+                        + "/call-records?extract=request:/q"))
+                .andExpect(status().isOk())
+                .andReturn();
+        String body = result.getResponse().getContentAsString();
+
+        // 点名要的字段在
+        assertThat(body).contains(REQUEST_MARKER);
+        // 没点名的一律不在：既没有正文字段，也没有正文里的其他内容
+        assertThat(body).doesNotContain("requestJson").doesNotContain("responseJson");
+        assertThat(body).doesNotContain(RESPONSE_MARKER);
+    }
+
+    @Test
+    @DisplayName("抽到的值超过 200 字符会被截断，并标出来")
+    void truncatesLongValues() throws Exception {
+        recordWithPayload("{\"q\":\"" + "x".repeat(500) + "\"}", "{}");
+
+        JsonNode value = search("?extract=request:/q").at("/items/0/extracted/request:~1q");
+
+        assertThat(value.get("value").asText()).hasSize(200);
+        assertThat(value.get("truncated").asBoolean()).isTrue();
+    }
+
+    /**
+     * 抽不到值有好几种原因，界面上要能分开 ——
+     * "路径写错了"和"这条正文太大没解析"该做的下一步完全不同。
+     */
+    @Test
+    @DisplayName("抽不到时说明原因：字段不存在 / 不是 JSON / 正文过大")
+    void reportsWhyAValueIsMissing() throws Exception {
+        recordWithPayload("{\"q\":\"hi\"}", "{}");
+        JsonNode missing = search("?extract=request:/no_such_field")
+                .at("/items/0/extracted/request:~1no_such_field");
+        assertThat(missing.get("state").asText()).isEqualTo("MISSING");
+        assertThat(missing.get("value").isNull()).isTrue();
+
+        // 打点时序列化失败写下的占位符，或历史遗留的坏数据
+        String callId = UUID.randomUUID().toString();
+        this.records.insertStarted(ToolCallRecord.started(callId, "t-bad", this.gatewayId,
+                this.downstreamId, "kb_a__broken", "broken", "这不是 JSON", BASE.plusSeconds(1)));
+        JsonNode notJson = search("?toolName=broken&extract=request:/q")
+                .at("/items/0/extracted/request:~1q");
+        assertThat(notJson.get("state").asText()).isEqualTo("NOT_JSON");
+
+        // 超过解析上限的正文一个字符都不读进来
+        String bigCallId = UUID.randomUUID().toString();
+        String big = "{\"q\":\"" + "y".repeat(CallPayloadExtractor.MAX_PAYLOAD_CHARS) + "\"}";
+        this.records.insertStarted(ToolCallRecord.started(bigCallId, "t-big", this.gatewayId,
+                this.downstreamId, "kb_a__big", "big", big, BASE.plusSeconds(2)));
+        JsonNode tooLarge = search("?toolName=big&extract=request:/q")
+                .at("/items/0/extracted/request:~1q");
+        assertThat(tooLarge.get("state").asText()).isEqualTo("TOO_LARGE");
+        assertThat(tooLarge.get("value").isNull()).isTrue();
+    }
+
+    @Test
+    @DisplayName("空 pointer 抽整个文档，相当于一个截断到 200 字符的预览列")
+    void emptyPointerYieldsAPreview() throws Exception {
+        recordWithPayload("{\"q\":\"" + REQUEST_MARKER + "\"}", "{}");
+
+        JsonNode value = search("?extract=request:").at("/items/0/extracted/request:");
+
+        assertThat(value.get("value").asText()).isEqualTo("{\"q\":\"" + REQUEST_MARKER + "\"}");
+    }
+
+    @Test
+    @DisplayName("路径写错直接报错，不是给一整列空白")
+    void rejectsMalformedExtract() throws Exception {
+        // 静默忽略会让人对着一整列"—"以为是数据里没有这个字段
+        assertThat(searchStatus("?extract=req:/q")).isEqualTo(400);
+        assertThat(searchStatus("?extract=request")).isEqualTo(400);
+        // 点号路径是最常见的手误
+        assertThat(searchStatus("?extract=request:q")).isEqualTo(400);
+        // 超过数量上限
+        assertThat(searchStatus("?extract=request:/a&extract=request:/b&extract=request:/c"
+                + "&extract=request:/d&extract=request:/e")).isEqualTo(400);
+
+        this.mockMvc.perform(get("/api/gateways/" + this.gatewayId + "/call-records?extract=req:/q"))
+                .andExpect(jsonPath("$.error.code").value("INVALID_REQUEST"));
+    }
+
+    private int searchStatus(String query) throws Exception {
+        return this.mockMvc.perform(get("/api/gateways/" + this.gatewayId + "/call-records" + query))
+                .andReturn().getResponse().getStatus();
+    }
+
+    // ------------------------------------------------ 导出 Excel（列表的衍生）
+
+    /*
+     * 导出是整个管理 API 里单次能带走内容最多的接口，所以这一组用例盯三件事：
+     * 导出的确实是筛选后的那些行、列由调用方说了算、以及行数上限真的生效且说得出口。
+     */
+
+    private byte[] exportBytes(String query) throws Exception {
+        MvcResult result = this.mockMvc.perform(
+                get("/api/gateways/" + this.gatewayId + "/call-records/export" + query))
+                .andExpect(status().isOk())
+                .andReturn();
+        return result.getResponse().getContentAsByteArray();
+    }
+
+    /** 把工作簿读成纯文本的行，日期按单元格格式渲染。 */
+    private static List<List<String>> rowsOf(byte[] xlsx) throws IOException {
+        DataFormatter formatter = new DataFormatter();
+        try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(xlsx))) {
+            Sheet sheet = workbook.getSheetAt(0);
+            List<List<String>> rows = new ArrayList<>();
+            for (Row row : sheet) {
+                List<String> cells = new ArrayList<>();
+                for (int index = 0; index < row.getLastCellNum(); index++) {
+                    Cell cell = row.getCell(index);
+                    cells.add(cell == null ? "" : formatter.formatCellValue(cell));
+                }
+                rows.add(cells);
+            }
+            return rows;
+        }
+    }
+
+    @Test
+    @DisplayName("导出当前筛选结果，表头 + 数据行都在")
+    void exportsFilteredRecordsAsXlsx() throws Exception {
+        record(this.gatewayId, this.downstreamId, "kb_a__search", CallStatus.SUCCESS, "t-1", 30);
+        record(this.gatewayId, this.downstreamId, "kb_a__ping", CallStatus.ERROR, "t-2", 20);
+        record(this.gatewayId, this.downstreamId, "kb_a__lookup", CallStatus.SUCCESS, "t-3", 10);
+
+        List<List<String>> rows = rowsOf(exportBytes("?status=ERROR"));
+
+        assertThat(rows).hasSize(2);
+        assertThat(rows.get(0)).contains("聚合工具", "状态", "trace_id");
+        assertThat(rows.get(1)).contains("kb_a__ping", "ERROR", "t-2");
+        // 时间是真正的日期单元格，按 yyyy-mm-dd hh:mm:ss 渲染，Excel 里能排序能筛选
+        assertThat(rows.get(1).get(0)).matches("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}");
+    }
+
+    @Test
+    @DisplayName("导出哪些列、表头写什么，由调用方决定")
+    void exportRespectsRequestedColumnsAndLabels() throws Exception {
+        record(this.gatewayId, this.downstreamId, "kb_a__search", CallStatus.SUCCESS, "t-1", 5);
+
+        List<List<String>> rows = rowsOf(exportBytes(
+                "?columns=status&columns=traceId&labels=状态&labels=链路"));
+
+        assertThat(rows.get(0)).containsExactly("状态", "链路");
+        assertThat(rows.get(1)).containsExactly("SUCCESS", "t-1");
+    }
+
+    @Test
+    @DisplayName("正文抽取列在导出里同样可用")
+    void exportCanIncludePayloadFields() throws Exception {
+        recordWithPayload("{\"q\":\"" + REQUEST_MARKER + "\"}",
+                "{\"content\":[{\"text\":\"" + RESPONSE_MARKER + "\"}]}");
+
+        List<List<String>> rows = rowsOf(exportBytes(
+                "?columns=exposedToolName&columns=request:/q&labels=工具&labels=查询词"));
+
+        assertThat(rows.get(0)).containsExactly("工具", "查询词");
+        assertThat(rows.get(1)).containsExactly("kb_a__search", REQUEST_MARKER);
+    }
+
+    /**
+     * 导出内容里有 Agent 传来的参数和下游返回的正文。
+     *
+     * 以 = + - @ 开头的单元格在 CSV 里会被 Excel 当公式执行 —— 这正是这个功能没做成 CSV
+     * 的原因。xlsx 的公式是独立的单元格类型，只要不主动写就不存在这条路。
+     */
+    @Test
+    @DisplayName("单元格一律是文本，不会变成公式")
+    void exportNeverWritesFormulas() throws Exception {
+        String injection = "=cmd|' /C calc'!A0";
+        recordWithPayload("{\"q\":\"" + injection + "\"}", "{}");
+
+        byte[] xlsx = exportBytes("?columns=request:/q&labels=查询词");
+
+        try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(xlsx))) {
+            Cell cell = workbook.getSheetAt(0).getRow(1).getCell(0);
+            assertThat(cell.getCellType()).isEqualTo(CellType.STRING);
+            assertThat(cell.getStringCellValue()).isEqualTo(injection);
+        }
+    }
+
+    @Test
+    @DisplayName("超过上限就截断，并在响应头里说清楚 —— 不给一份看着完整的文件")
+    void exportCapsRowsAndSaysSo() throws Exception {
+        seedBulkRecords(CallRecordService.MAX_EXPORT_ROWS + 1);
+
+        MvcResult result = this.mockMvc.perform(
+                get("/api/gateways/" + this.gatewayId + "/call-records/export?columns=callId"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-Export-Truncated", "true"))
+                .andExpect(header().string("X-Export-Rows",
+                        String.valueOf(CallRecordService.MAX_EXPORT_ROWS)))
+                .andExpect(header().string("X-Export-Total",
+                        String.valueOf(CallRecordService.MAX_EXPORT_ROWS + 1)))
+                .andReturn();
+
+        // 表头 + 5000 行
+        assertThat(rowsOf(result.getResponse().getContentAsByteArray()))
+                .hasSize(CallRecordService.MAX_EXPORT_ROWS + 1);
+    }
+
+    @Test
+    @DisplayName("没截断时也把总数和行数说出来")
+    void exportReportsCountsWhenComplete() throws Exception {
+        record(this.gatewayId, this.downstreamId, "kb_a__search", CallStatus.SUCCESS, "t-1", 5);
+
+        this.mockMvc.perform(get("/api/gateways/" + this.gatewayId + "/call-records/export"))
+                .andExpect(header().string("X-Export-Truncated", "false"))
+                .andExpect(header().string("X-Export-Total", "1"))
+                .andExpect(header().string("X-Export-Rows", "1"));
+    }
+
+    @Test
+    @DisplayName("列名写错直接报错，不是悄悄少导一列")
+    void rejectsBadExportColumns() throws Exception {
+        this.mockMvc.perform(get("/api/gateways/" + this.gatewayId
+                        + "/call-records/export?columns=noSuchColumn"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_REQUEST"));
+
+        // labels 给了就必须和 columns 一一对应，否则表头会错位
+        this.mockMvc.perform(get("/api/gateways/" + this.gatewayId
+                        + "/call-records/export?columns=status&columns=traceId&labels=状态"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_REQUEST"));
+
+        // 抽取列的路径同样走列表接口那套校验
+        this.mockMvc.perform(get("/api/gateways/" + this.gatewayId
+                        + "/call-records/export?columns=request:q"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("文件名带上网关 slug，中文名走 RFC 5987")
+    void exportFileNameCarriesGatewaySlug() throws Exception {
+        record(this.gatewayId, this.downstreamId, "kb_a__search", CallStatus.SUCCESS, "t-1", 5);
+
+        MvcResult result = this.mockMvc.perform(
+                get("/api/gateways/" + this.gatewayId + "/call-records/export"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        String disposition = result.getResponse().getHeader("Content-Disposition");
+        assertThat(disposition).startsWith("attachment;");
+        // ASCII 回退 + UTF-8 版本各一份
+        assertThat(disposition).contains("filename=\"call-records-").contains("filename*=UTF-8''");
+        assertThat(result.getResponse().getContentType())
+                .isEqualTo("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    }
+
+    /** 一条 INSERT 造出很多行，逐条插 5001 次太慢。 */
+    private void seedBulkRecords(int count) {
+        this.jdbcClient.sql("""
+                INSERT INTO tool_call_record (call_id, trace_id, gateway_id, downstream_mcp_id,
+                        exposed_tool_name, original_tool_name, request_json, response_json,
+                        status, error_code, error_message, started_at, finished_at, duration_ms)
+                SELECT 'bulk-' || X, 'bulk-trace', :gatewayId, :downstreamId,
+                       'kb_a__bulk', 'bulk', '{}', '{}', 'SUCCESS', NULL, NULL,
+                       DATEADD('SECOND', -X, CURRENT_TIMESTAMP),
+                       DATEADD('SECOND', -X, CURRENT_TIMESTAMP), 10
+                  FROM SYSTEM_RANGE(1, :count)
+                """)
+                .param("gatewayId", this.gatewayId)
+                .param("downstreamId", this.downstreamId)
+                .param("count", count)
+                .update();
     }
 }
