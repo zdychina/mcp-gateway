@@ -1,6 +1,7 @@
 package com.mcpgateway.downstream;
 
 import com.mcpgateway.config.GatewayProperties;
+import com.mcpgateway.config.GatewayVersion;
 import com.mcpgateway.domain.DownstreamMcp;
 import com.mcpgateway.error.ErrorCode;
 import com.mcpgateway.error.GatewayException;
@@ -28,9 +29,13 @@ public class DownstreamClientFactory {
 
     private final GatewayProperties properties;
 
-    public DownstreamClientFactory(DownstreamHeaderCodec headerCodec, GatewayProperties properties) {
+    private final GatewayVersion version;
+
+    public DownstreamClientFactory(DownstreamHeaderCodec headerCodec, GatewayProperties properties,
+            GatewayVersion version) {
         this.headerCodec = headerCodec;
         this.properties = properties;
+        this.version = version;
     }
 
     /**
@@ -74,7 +79,8 @@ public class DownstreamClientFactory {
                 .requestTimeout(config.getCallTimeout())
                 .initializationTimeout(config.getCallTimeout())
                 // SDK 默认上报的 clientInfo 版本号是过期的，显式声明便于子 MCP 侧识别来访者。
-                .clientInfo(new McpSchema.Implementation("mcp-gateway", "MCP Aggregation Gateway", "1.0.0"))
+                .clientInfo(new McpSchema.Implementation("mcp-gateway", "MCP Aggregation Gateway",
+                        this.version.value()))
                 .build();
     }
 

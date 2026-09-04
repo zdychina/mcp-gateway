@@ -113,6 +113,24 @@
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
+        <!--
+          生成 META-INF/build-info.properties，让运行期能读到 pom 里的版本号，
+          不必再在代码里写死一份（对外上报 MCP clientInfo / serverInfo 要用）。
+
+          这里只加 build-info；父 pom 的 pluginManagement 已经声明了 id 为
+          repackage 的执行，execution 按 id 合并，所以打 boot jar 不受影响。
+
+          默认绑在 generate-resources，产物落到 target/classes/，编译和测试
+          都能读到。
+        -->
+        <executions>
+          <execution>
+            <id>build-info</id>
+            <goals>
+              <goal>build-info</goal>
+            </goals>
+          </execution>
+        </executions>
       </plugin>
 
       <!--

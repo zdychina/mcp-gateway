@@ -1,6 +1,7 @@
 package com.mcpgateway.mcpserver;
 
 import com.mcpgateway.config.GatewayProperties;
+import com.mcpgateway.config.GatewayVersion;
 import com.mcpgateway.domain.Gateway;
 import com.mcpgateway.recording.ToolCallRecorder;
 import io.modelcontextprotocol.server.McpServer;
@@ -26,8 +27,8 @@ public final class GatewayMcpRuntime implements AutoCloseable {
 
     private final McpStatelessSyncServer server;
 
-    private GatewayMcpRuntime(Gateway gateway, GatewayProperties properties, GatewayToolRouter router,
-            ToolCallRecorder recorder) {
+    private GatewayMcpRuntime(Gateway gateway, GatewayProperties properties, GatewayVersion version,
+            GatewayToolRouter router, ToolCallRecorder recorder) {
         this.slug = gateway.slug();
 
         this.transport = HttpServletStatelessServerTransport.builder()
@@ -47,7 +48,7 @@ public final class GatewayMcpRuntime implements AutoCloseable {
                 delegate -> new GatewayMcpHandler(delegate, gateway.id(), gateway.slug(), router, recorder));
 
         this.server = McpServer.sync(capturing)
-                .serverInfo("mcp-gateway-" + gateway.slug(), "1.0.0")
+                .serverInfo("mcp-gateway-" + gateway.slug(), version.value())
                 // 需求 6.1.4：网关描述映射为 initialize 结果里的 instructions
                 .instructions(gateway.description())
                 .capabilities(McpSchema.ServerCapabilities.builder().tools(true).build())
@@ -57,9 +58,9 @@ public final class GatewayMcpRuntime implements AutoCloseable {
         log.info("MCP endpoint ready for gateway [{}] at {}", gateway.slug(), mcpPath(gateway.slug()));
     }
 
-    public static GatewayMcpRuntime create(Gateway gateway, GatewayProperties properties,
+    public static GatewayMcpRuntime create(Gateway gateway, GatewayProperties properties, GatewayVersion version,
             GatewayToolRouter router, ToolCallRecorder recorder) {
-        return new GatewayMcpRuntime(gateway, properties, router, recorder);
+        return new GatewayMcpRuntime(gateway, properties, version, router, recorder);
     }
 
     /** 需求 FR-04：每个网关的独立 MCP 地址。 */
