@@ -18,6 +18,14 @@ export const router = createRouter({
   routes: [
     { path: '/', redirect: '/gateways' },
     { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
+    /*
+     * 总览页按需加载。
+     *
+     * 它是这套界面里唯一依赖图表库的页面，而图表库比其余所有代码加起来还大。
+     * 静态引入会让每个只想看网关列表的人先下一遍 ECharts；拆出去之后它只在
+     * 真正打开总览时才加载，首屏产物维持在原来的量级。
+     */
+    { path: '/dashboard', name: 'dashboard', component: () => import('../views/DashboardView.vue') },
     { path: '/gateways', name: 'gateway-list', component: GatewayListView },
     { path: '/gateways/:id', name: 'gateway-detail', component: GatewayDetailView, props: true },
     { path: '/gateways/:id/calls', name: 'call-records', component: CallRecordsView, props: true }

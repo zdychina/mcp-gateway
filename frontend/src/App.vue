@@ -48,6 +48,14 @@ async function signOut(): Promise<void> {
         MCP 聚合网关
       </a>
 
+      <!--
+        主导航。未登录时不渲染 —— 登录页上点过去只会被守卫弹回来。
+      -->
+      <div v-if="session.state.authenticated" class="navbar-nav">
+        <RouterLink class="navbar-link" :to="{ name: 'dashboard' }">总览</RouterLink>
+        <RouterLink class="navbar-link" :to="{ name: 'gateway-list' }">网关</RouterLink>
+      </div>
+
       <span class="navbar-spacer"></span>
 
       <!--

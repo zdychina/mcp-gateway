@@ -181,6 +181,88 @@ export interface RotatedToken {
   mcpUrl: string
 }
 
+// ------------------------------------------------------------------ 统计
+
+/**
+ * 统计里的比率和分位。
+ *
+ * **没有样本时是 null，不是 0** —— "成功率 0%"是调用全失败了，
+ * "这段时间没有调用"是另一回事，界面上要画成不同的东西。
+ */
+export interface StatsTotals {
+  calls: number
+  success: number
+  error: number
+  timeout: number
+  /** 仍在进行中，或上次进程异常退出的残留 */
+  started: number
+  successRate: number | null
+  avgDurationMs: number | null
+  /** 95 分位耗时，只统计已结束的调用 */
+  p95DurationMs: number | null
+}
+
+/** 时间序列上的一个点。空桶也在里面，服务端补齐过 */
+export interface StatsSeriesPoint {
+  at: string
+  total: number
+  success: number
+  error: number
+  timeout: number
+}
+
+/** 一个网关的调用情况。status 是网关自身的派生状态，与调用量无关 */
+export interface GatewayStat {
+  gatewayId: string
+  name: string
+  slug: string
+  status: GatewayStatus
+  calls: number
+  failures: number
+  successRate: number | null
+  avgDurationMs: number | null
+  p95DurationMs: number | null
+}
+
+/** 子 MCP 或工具的调用情况。工具没有 id，这时 id 与 name 相同 */
+export interface NamedStat {
+  id: string
+  name: string
+  calls: number
+  failures: number
+  successRate: number | null
+  avgDurationMs: number | null
+  p95DurationMs: number | null
+}
+
+export interface ErrorStat {
+  code: string
+  count: number
+}
+
+/** 统计页的一次性响应：同一个时间窗、同一份数据的几种切法。 */
+export interface Stats {
+  from: string
+  to: string
+  /** 时间桶粒度，由窗口长度决定 */
+  bucket: 'HOUR' | 'DAY'
+  totals: StatsTotals
+  series: StatsSeriesPoint[]
+  gateways: GatewayStat[]
+  /** 只在指定了网关时非空 */
+  downstreams: NamedStat[]
+  tools: NamedStat[]
+  errorCodes: ErrorStat[]
+}
+
+export interface StatsFilters {
+  gatewayId?: string
+  /** ISO-8601 instant，含 */
+  from?: string
+  /** ISO-8601 instant，不含 */
+  to?: string
+}
+
 // ---------------------------------------------------------------- 调用记录
 
 /**

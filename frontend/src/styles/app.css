@@ -589,6 +589,99 @@ table.table.tools { table-layout: fixed; min-width: 46rem; }
 }
 .table.tools .desc-actions .hint { color: var(--text-subtle); font-size: .74rem; }
 
+/* ================================================================== 总览页 */
+
+/* 主导航。放在品牌名右边，和右侧的身份/主题分居两端 */
+.navbar-nav { display: flex; align-items: center; gap: var(--sp-1); margin-left: var(--sp-4); }
+.navbar-link {
+  padding: .25rem var(--sp-3);
+  border-radius: var(--radius);
+  color: var(--text-muted); font-size: .86rem; font-weight: 500;
+  transition: background var(--transition), color var(--transition);
+}
+.navbar-link:hover { background: var(--surface-sunken); color: var(--text); text-decoration: none; }
+/* 当前页高亮。router-link-active 会把父级路由也点亮，所以用 exact */
+.navbar-link.router-link-exact-active { background: var(--accent-soft); color: var(--accent); }
+
+.filter-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-4); flex-wrap: wrap;
+}
+.scope-picker { display: inline-flex; align-items: center; gap: var(--sp-2); }
+
+/* ------------------------------------------------------------------ 数字块 */
+
+/*
+ * 四个数字回答"要不要紧"。它们不是图 —— 一个数字配一句上下文，比任何图表都快。
+ */
+.stat-grid {
+  display: grid; gap: var(--sp-4); margin-bottom: var(--sp-4);
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+.stat-tile {
+  display: flex; flex-direction: column; gap: .1rem;
+  padding: var(--sp-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+.stat-tile .label { font-size: .78rem; color: var(--text-muted); }
+.stat-tile strong {
+  font-size: 1.75rem; font-weight: 600; line-height: 1.25;
+  font-variant-numeric: tabular-nums; letter-spacing: -.02em;
+  color: var(--text);
+}
+/* 加载时占位：数字位置先撑住，填进来时布局不跳 */
+.stat-tile strong.skeleton { min-height: 2.2rem; width: 4.5rem; border-radius: var(--radius-sm); }
+.stat-tile strong.ok { color: var(--success); }
+.stat-tile strong.bad { color: var(--danger); }
+.stat-tile .sub { font-size: .76rem; color: var(--text-subtle); }
+
+/* ------------------------------------------------------------------ 图表卡 */
+
+.chart-grid {
+  display: grid; gap: var(--sp-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
+}
+.chart-grid > .card { margin-bottom: 0; }
+
+.chart-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--sp-3); flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4) 0;
+}
+.chart-head h2 { font-size: .92rem; }
+.chart-head p { margin-top: .1rem; }
+
+.chart { width: 100%; }
+.chart-body { padding: 0 var(--sp-2) var(--sp-2); }
+
+/* 图表还没到位时先占住高度，数据填进来时页面不跳 */
+.chart-placeholder { height: 15rem; margin: var(--sp-3) var(--sp-4) var(--sp-4); }
+
+.empty-state.small { padding: var(--sp-5) var(--sp-4); gap: var(--sp-2); }
+.empty-state.small .title { font-size: .88rem; }
+.empty-state.small p { font-size: .8rem; }
+
+/* --------------------------------------------------------------- 工具排行 */
+
+.table.tools-rank td { vertical-align: middle; }
+.tools-rank .rank-value { display: block; }
+/* 数字旁边一条底纹：不用比对刻度就知道谁最忙 */
+.tools-rank .rank-bar {
+  display: block; height: 3px; margin-top: .25rem;
+  background: var(--border); border-radius: 2px; overflow: hidden;
+}
+.tools-rank .rank-fill { display: block; height: 100%; background: var(--accent); opacity: .5; }
+.has-failures { color: var(--danger); font-weight: 600; }
+
+.slug {
+  margin-left: var(--sp-2);
+  font-size: .72rem; color: var(--text-subtle);
+  background: transparent; padding: 0;
+}
+
 /* ============================================================== 调用记录页 */
 
 /*

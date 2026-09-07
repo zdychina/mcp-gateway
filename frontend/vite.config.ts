@@ -31,6 +31,13 @@ export default defineConfig(({ command }) => ({
   base: command === 'build' ? '/app/' : '/',
 
   build: {
+    /*
+     * 总览页的 ECharts 单独成块（约 530 KB / gzip 180 KB），超过 rollup 默认的 500 KB 提醒线。
+     * 它是路由级懒加载的，只在真正打开总览时才下载，首屏产物仍在 170 KB 量级 ——
+     * 所以这里把阈值抬到刚好放得下它，而不是让每次构建都打印一条不需要处理的告警：
+     * 一直响的警报等于没有警报。
+     */
+    chunkSizeWarningLimit: 600,
     outDir: '../src/main/resources/static/app',
     // 只清空 static/app/ 这个子目录，动不到同级的 bootstrap.min.css 等既有资源。
     emptyOutDir: true,

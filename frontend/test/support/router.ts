@@ -14,6 +14,7 @@ export function createTestRouter(): Router {
     history: createWebHistory('/ui/'),
     routes: [
       { path: '/', redirect: '/gateways' },
+      { path: '/dashboard', name: 'dashboard', component: blank },
       { path: '/gateways', name: 'gateway-list', component: blank },
       { path: '/gateways/:id', name: 'gateway-detail', component: blank },
       { path: '/gateways/:id/calls', name: 'call-records', component: blank }
