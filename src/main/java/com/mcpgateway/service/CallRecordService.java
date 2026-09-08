@@ -157,8 +157,18 @@ public class CallRecordService {
      */
     public static final int MAX_EXPORT_ROWS = 5000;
 
-    /** 分批查库的批大小。整页 5000 条连同正文一次性读进内存没有必要。 */
+    /** 分批查库的批大小。整页 5000 条一次性读进内存没有必要。 */
     private static final int EXPORT_CHUNK = 500;
+
+    /**
+     * 带抽取列时的批大小。
+     *
+     * 这一批的正文会同时驻留在内存里，上界是 批大小 × 2 个字段 × MAX_PAYLOAD_CHARS。
+     * 按 500 算就是约 128 MB —— 而 MAX_PAYLOAD_CHARS 那条注释里推的是"一页 100 条"，
+     * 说的是列表路径，导出批比它大五倍。收到 100 让两条路径的上界对齐（约 25 MB）。
+     * 不带抽取列时不读正文，用大批次少查几次库就行。
+     */
+    private static final int EXPORT_EXTRACT_CHUNK = 100;
 
     /** 内置列：键 → 表头、列宽、取值。顺序就是不指定 columns 时的默认顺序。 */
     private static final Map<String, BuiltInColumn> BUILT_IN_COLUMNS = builtInColumns();
@@ -293,8 +303,14 @@ public class CallRecordService {
             throw GatewayException.of(ErrorCode.INVALID_REQUEST, "columns must not be empty");
         }
         if (labels != null && !labels.isEmpty() && labels.size() != keys.size()) {
+            /*
+             * 最常见的原因是逗号：Spring 会把 List<String> 参数按逗号切开，
+             * 所以一个叫"查询, 关键词"的列名会变成两项。光说数量对不上，
+             * 调用方对着自己填的列名根本想不到这一层。
+             */
             throw GatewayException.of(ErrorCode.INVALID_REQUEST,
-                    "labels must have the same number of entries as columns");
+                    "labels must have the same number of entries as columns"
+                            + " (a comma inside a label or column splits it into two entries)");
         }
 
         // 带冒号的一律按抽取列解析，顺带复用列表接口那套校验（格式、数量上限）
@@ -344,11 +360,13 @@ public class CallRecordService {
                 .map(column -> new CallRecordExcelWriter.Column(column.label(), column.width()))
                 .toList();
 
+        int chunkSize = specs.isEmpty() ? EXPORT_CHUNK : EXPORT_EXTRACT_CHUNK;
+
         this.excelWriter.write(header, sink -> {
             int written = 0;
             int limit = plan.rowCount();
             while (written < limit) {
-                int batch = Math.min(EXPORT_CHUNK, limit - written);
+                int batch = Math.min(chunkSize, limit - written);
                 CallRecordQuery chunkQuery = withWindow(plan.query, written, batch);
                 List<ToolCallSummary> summaries = this.records.search(chunkQuery);
                 if (summaries.isEmpty()) {

@@ -73,23 +73,42 @@ const tokens = computed(() => {
   return chartTokens(resolvedIsDark())
 })
 
+/*
+ * 请求序号。
+ *
+ * 连着点"1 小时""24 小时"，慢的那个后回来就会盖掉新的：标题写着 24 小时、
+ * 数据却是 1 小时的，而且它的 finally 还会在新请求还没回来时就把 loading 关掉。
+ * 调用记录页当初正是为这个加了同样的东西。
+ */
+let requestSeq = 0
+
 async function load(): Promise<void> {
+  const seq = ++requestSeq
   loading.value = true
   const selected = RANGES.find(item => item.key === range.value) ?? RANGES[1]
   try {
-    data.value = await statsApi.load({
+    const next = await statsApi.load({
       gatewayId: gatewayId.value || undefined,
       from: new Date(Date.now() - selected.ms).toISOString()
     })
+    if (seq !== requestSeq) {
+      return
+    }
+    data.value = next
     loadedAt.value = Date.now()
     loadFailed.value = false
   }
   catch (error) {
+    if (seq !== requestSeq) {
+      return
+    }
     loadFailed.value = true
     alerts.error('加载统计失败', error instanceof ApiError ? error.display : String(error))
   }
   finally {
-    loading.value = false
+    if (seq === requestSeq) {
+      loading.value = false
+    }
   }
 }
 
@@ -335,7 +354,7 @@ function callRecordsLink(id: string): string {
       </div>
       <label class="small muted scope-picker">
         网关
-        <select v-model="gatewayId" class="control control-inline" ariaLabel="按网关筛选">
+        <select v-model="gatewayId" class="control control-inline" aria-label="按网关筛选">
           <option value="">全部网关</option>
           <option v-for="item in gatewayOptions" :key="item.gatewayId" :value="item.gatewayId">
             {{ item.name }}
@@ -439,7 +458,10 @@ function callRecordsLink(id: string): string {
         <div class="chart-head">
           <div>
             <h2>各网关调用量</h2>
-            <p class="small muted">点柱子进入该网关</p>
+            <p class="small muted">
+              点柱子{{ gatewayId ? '切换到那个网关' : '进入该网关' }}
+              <template v-if="gatewayId"> · 这里始终是全部网关</template>
+            </p>
           </div>
         </div>
         <div v-if="loading" class="chart-placeholder skeleton"></div>
@@ -531,7 +553,11 @@ function callRecordsLink(id: string): string {
     </div>
 
     <section class="card">
-      <div class="card-header">全部网关</div>
+      <div class="card-header split">
+        <span>全部网关</span>
+        <!-- 这一块是跨网关的导航，选了网关也照样列全 —— 不说清楚会以为是筛漏了 -->
+        <span v-if="gatewayId" class="small muted">不受上面的网关筛选影响</span>
+      </div>
       <div class="table-wrap">
         <table class="table">
           <thead>

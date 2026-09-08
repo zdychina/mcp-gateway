@@ -41,9 +41,14 @@ public class CallStatsRepository {
     public record Window(String gatewayId, Instant from, Instant to) {
     }
 
-    /** 一个分组的聚合结果。key 是 gateway_id / downstream_mcp_id / 工具名 / 错误码。 */
-    public record Grouped(String key, int calls, int failures, Double avgDurationMs,
-            Double p95DurationMs) {
+    /**
+     * 一个分组的聚合结果。key 是 gateway_id / downstream_mcp_id / 工具名 / 错误码。
+     *
+     * successes 是真正的 SUCCESS 条数，不能用 calls - failures 去推 ——
+     * 那样会把还没结束的 STARTED 算成成功，同一页上的成功率就会自相矛盾。
+     */
+    public record Grouped(String key, int calls, int successes, int failures,
+            Double avgDurationMs, Double p95DurationMs) {
     }
 
     /** 时间序列上的一个点：某个桶里某个状态的条数。 */
@@ -59,6 +64,7 @@ public class CallStatsRepository {
      */
     private static final String METRICS = """
             COUNT(*) AS calls,
+            COUNT(CASE WHEN status = 'SUCCESS' THEN 1 END) AS successes,
             COUNT(CASE WHEN status IN ('ERROR', 'TIMEOUT') THEN 1 END) AS failures,
             AVG(duration_ms) AS avg_ms,
             PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95_ms
@@ -92,7 +98,8 @@ public class CallStatsRepository {
 
         return this.jdbcClient.sql("SELECT " + METRICS + " FROM tool_call_record\n" + where)
                 .params(params)
-                .query((rs, rowNum) -> new Grouped(null, rs.getInt("calls"), rs.getInt("failures"),
+                .query((rs, rowNum) -> new Grouped(null, rs.getInt("calls"),
+                        rs.getInt("successes"), rs.getInt("failures"),
                         nullableDouble(rs.getBigDecimal("avg_ms")),
                         nullableDouble(rs.getBigDecimal("p95_ms"))))
                 .single();
@@ -146,7 +153,7 @@ public class CallStatsRepository {
         params.put("limit", limit);
 
         return this.jdbcClient.sql("""
-                SELECT error_code AS k, COUNT(*) AS calls, COUNT(*) AS failures,
+                SELECT error_code AS k, COUNT(*) AS calls, 0 AS successes, COUNT(*) AS failures,
                        AVG(duration_ms) AS avg_ms,
                        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95_ms
                   FROM tool_call_record
@@ -187,7 +194,8 @@ public class CallStatsRepository {
     }
 
     private static Grouped mapGrouped(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
-        return new Grouped(rs.getString("k"), rs.getInt("calls"), rs.getInt("failures"),
+        return new Grouped(rs.getString("k"), rs.getInt("calls"), rs.getInt("successes"),
+                rs.getInt("failures"),
                 nullableDouble(rs.getBigDecimal("avg_ms")),
                 nullableDouble(rs.getBigDecimal("p95_ms")));
     }

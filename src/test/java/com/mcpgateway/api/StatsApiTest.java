@@ -307,6 +307,53 @@ class StatsApiTest extends AbstractApiTest {
                 .andExpect(jsonPath("$.error.code").value("GATEWAY_NOT_FOUND"));
     }
 
+    /**
+     * 选中一个网关之后，"全部网关"那一块仍然要如实显示别的网关。
+     *
+     * 它是跨网关的导航：沿用被过滤的窗口，表里会出现一排 0，而那些网关这段时间明明有流量；
+     * 图上也只剩一根柱子，"点柱子切到那个网关"这个动作直接没了。
+     */
+    @Test
+    @DisplayName("按网关筛选时，网关分布仍然是全部网关的")
+    void gatewayBreakdownStaysGlobalWhenScoped() throws Exception {
+        record(this.gatewayId, this.downstreamA, "kb_a__search", CallStatus.SUCCESS, 10, 100);
+        record(this.otherGatewayId, null, "other__tool", CallStatus.SUCCESS, 12, 100);
+        record(this.otherGatewayId, null, "other__tool", CallStatus.ERROR, 14, 100);
+
+        JsonNode scoped = stats("?gatewayId=" + this.gatewayId);
+
+        // 总量、趋势、工具这些是被筛过的
+        assertThat(scoped.get("totals").get("calls").asInt()).isEqualTo(1);
+        // 但网关分布不是
+        assertThat(findGateway(scoped.get("gateways"), this.otherGatewayId)
+                .get("calls").asInt()).isEqualTo(2);
+        assertThat(findGateway(scoped.get("gateways"), this.gatewayId)
+                .get("calls").asInt()).isEqualTo(1);
+    }
+
+    /**
+     * 成功率只能用真实的 SUCCESS 条数算。
+     *
+     * 用 calls - failures 去推会把还没结束的 STARTED 算成成功，同一页上顶部的总成功率
+     * 和下面每个网关、每个工具的成功率就会互相打架。
+     */
+    @Test
+    @DisplayName("进行中的调用不算成功：分组成功率和总成功率一致")
+    void inFlightCallsAreNotCountedAsSuccess() throws Exception {
+        record(this.gatewayId, this.downstreamA, "kb_a__search", CallStatus.SUCCESS, 10, 100);
+        record(this.gatewayId, this.downstreamA, "kb_a__search", CallStatus.STARTED, 5, 0);
+
+        JsonNode data = stats("");
+
+        assertThat(data.get("totals").get("successRate").asDouble()).isEqualTo(0.5);
+        assertThat(findGateway(data.get("gateways"), this.gatewayId)
+                .get("successRate").asDouble()).isEqualTo(0.5);
+        assertThat(data.at("/tools/0/successRate").asDouble()).isEqualTo(0.5);
+
+        JsonNode scoped = stats("?gatewayId=" + this.gatewayId);
+        assertThat(scoped.at("/downstreams/0/successRate").asDouble()).isEqualTo(0.5);
+    }
+
     /** 从网关列表里挑出某一个。别的测试类也会留下网关，不能按下标取。 */
     private static JsonNode findGateway(JsonNode gateways, String gatewayId) {
         for (JsonNode gateway : gateways) {

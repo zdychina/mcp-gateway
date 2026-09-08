@@ -100,7 +100,20 @@ export function validatePointer(pointer: string): string | null {
   if (pointer.length > 200) {
     return '路径太长了'
   }
-  return null
+  return validateNoComma(pointer, '路径')
+}
+
+/**
+ * 列名和路径里不能有逗号。
+ *
+ * 服务端按逗号切开 columns / labels / extract 这几个参数（逗号分隔和重复传参是同一回事），
+ * 所以一个叫"查询, 关键词"的列名会被拆成两项，导出时报"数量对不上"——
+ * 而那条报错和刚才输的列名之间毫无线索可循。在这里挡住，说清楚原因。
+ */
+export function validateNoComma(value: string, what: string): string | null {
+  return value.includes(',') || value.includes('，')
+    ? `${what}里不能有逗号 —— 服务端按逗号分隔多个值，会被拆成两项`
+    : null
 }
 
 export function useCallColumns(gatewayId: Ref<string>) {
@@ -124,6 +137,25 @@ export function useCallColumns(gatewayId: Ref<string>) {
     ])
     const restored = (stored.layout ?? []).filter(key => known.has(key))
     layout.value = restored.length > 0 ? restored : [...DEFAULT_LAYOUT]
+    repairExtractCap()
+  }
+
+  /**
+   * 存量配置里的抽取列可能超过上限。
+   *
+   * 上限从前只在"添加"那条路上拦过，所以浏览器里可能已经存着六个可见的正文列。
+   * 不在读回来时修一次，页面每次刷新都会收到 400，而操作人根本猜不到病根在列配置上 ——
+   * 报错说的是"extract accepts at most 4 fields"，列菜单里却看不出哪里超了。
+   */
+  function repairExtractCap(): void {
+    const extractKeys = layout.value.filter(key =>
+      custom.value.some(column => column.key === key))
+    if (extractKeys.length <= MAX_EXTRACT_COLUMNS) {
+      return
+    }
+    const dropped = new Set(extractKeys.slice(MAX_EXTRACT_COLUMNS))
+    layout.value = layout.value.filter(key => !dropped.has(key))
+    persist()
   }
 
   watch(gatewayId, load, { immediate: true })
@@ -156,17 +188,35 @@ export function useCallColumns(gatewayId: Ref<string>) {
 
   const visibleExtractCount = computed(() => extractSpecs.value.length)
 
-  function toggle(key: string): void {
+  /**
+   * 开关一列。
+   *
+   * @returns 没能打开时的原因，正常返回 null
+   */
+  function toggle(key: string): string | null {
     if (isVisible(key)) {
       // 至少留一列，否则表格会变成一堆看不出是什么的空行
       if (layout.value.length > 1) {
         layout.value = layout.value.filter(item => item !== key)
+        persist()
       }
+      return null
     }
-    else {
-      layout.value = [...layout.value, key]
+
+    /*
+     * 上限在这条路上同样要拦。
+     *
+     * 只在 addExtractColumn 里拦是不够的：加满四列、关掉两列、再加两列、
+     * 然后把关掉的那两列勾回来 —— 六列就这么绕过去了，之后每次查询都是 400。
+     */
+    const column = allColumns.value.find(item => item.key === key)
+    if (column?.extract && visibleExtractCount.value >= MAX_EXTRACT_COLUMNS) {
+      return `最多同时显示 ${MAX_EXTRACT_COLUMNS} 个正文列，先关掉一个再打开`
     }
+
+    layout.value = [...layout.value, key]
     persist()
+    return null
   }
 
   function move(key: string, delta: number): void {
@@ -192,13 +242,14 @@ export function useCallColumns(gatewayId: Ref<string>) {
     if (pointerError) {
       return pointerError
     }
+    const labelError = validateNoComma(label.trim(), '列名')
+    if (labelError) {
+      return labelError
+    }
     const key = extractKey(spec)
     if (allColumns.value.some(column => column.key === key)) {
       // 已经有了就直接打开它，比报一句"重复了"有用
-      if (!isVisible(key)) {
-        toggle(key)
-      }
-      return null
+      return isVisible(key) ? null : toggle(key)
     }
     if (visibleExtractCount.value >= MAX_EXTRACT_COLUMNS) {
       return `最多同时显示 ${MAX_EXTRACT_COLUMNS} 个正文列，先关掉一个再加`

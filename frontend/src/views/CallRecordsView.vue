@@ -459,6 +459,10 @@ function markFresh(page: CallRecordPage, enabled: boolean): void {
     }
   }
   freshIds.value = fresh
+
+  // 只记住当前这一页：这个集合从前只增不减，挂着自动刷新过一夜能攒出几万个 id，
+  // 而判断"这一行是不是新来的"只需要跟上一次看到的那一页比
+  seenIds.clear()
   for (const item of page.items) {
     seenIds.add(item.callId)
   }
@@ -683,15 +687,30 @@ const draft = reactive<{ source: ExtractSpec['source'], pointer: string, label: 
   label: ''
 })
 
-const addColumnError = ref('')
+/** 列菜单里那句错误提示，加列和开关列共用。 */
+const columnError = ref('')
 
 function onAddColumn(): void {
   const error = addExtractColumn({ source: draft.source, pointer: draft.pointer.trim() },
     draft.label)
-  addColumnError.value = error ?? ''
+  columnError.value = error ?? ''
   if (!error) {
     draft.pointer = ''
     draft.label = ''
+  }
+}
+
+/**
+ * 勾选/取消一列。
+ *
+ * 被拒绝时要亲手把复选框扳回去：isVisible 的值没变，Vue 不会重绘这个 DOM 状态，
+ * 界面上就会留下一个"勾着但其实没生效"的框。
+ */
+function onToggleColumn(key: string, event: Event): void {
+  const error = toggleColumn(key)
+  columnError.value = error ?? ''
+  if (error) {
+    (event.target as HTMLInputElement).checked = false
   }
 }
 
@@ -877,7 +896,7 @@ function percent(value: number): string {
                 :class="{ off: !isColumnVisible(column.key) }">
               <label class="check">
                 <input type="checkbox" :checked="isColumnVisible(column.key)"
-                       @change="toggleColumn(column.key)">
+                       @change="onToggleColumn(column.key, $event)">
                 <span class="col-label">{{ column.label }}</span>
               </label>
               <code v-if="column.extract" class="col-path">{{ column.key }}</code>
@@ -914,7 +933,7 @@ function percent(value: number): string {
               留空表示整个文档。最多 4 列，每格最长 200 字符 ——
               服务端只回抽到的值，正文本身不会进列表。
             </p>
-            <p v-if="addColumnError" class="hint warn">{{ addColumnError }}</p>
+            <p v-if="columnError" class="hint warn">{{ columnError }}</p>
           </form>
         </div>
       </details>

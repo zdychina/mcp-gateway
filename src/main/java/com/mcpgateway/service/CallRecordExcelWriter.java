@@ -95,9 +95,16 @@ public class CallRecordExcelWriter {
             workbook.write(out);
         }
         finally {
-            // 必须删掉 SXSSF 的临时文件，否则导出几次就在磁盘上留下几份
-            workbook.dispose();
-            workbook.close();
+            /*
+             * 顺序是 close 再 dispose（POI 的文档顺序），并且 dispose 放在内层 finally 里 ——
+             * close 抛异常时临时文件同样要删掉，否则导出几次就在磁盘上留下几份。
+             */
+            try {
+                workbook.close();
+            }
+            finally {
+                workbook.dispose();
+            }
         }
     }
 

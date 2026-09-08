@@ -326,11 +326,15 @@ public class ToolCallRecordRepository {
                 .param("gatewayId", gatewayId)
                 .param("callIds", callIds)
                 .query((rs, rowNum) -> {
-                    // 流必须按列的先后顺序读：有些驱动在读了后面的列之后就不让回头读前面的流了
+                    /*
+                     * 严格按列的先后顺序取：JDBC 只保证向前访问，读过后面的列之后不保证
+                     * 还能回头读前面的。call_id 是第一列，必须在两个流之前拿到手 ——
+                     * H2 会把整行物化所以怎么写都能跑，但这个顺序是接口约定，不是实现细节。
+                     */
+                    String callId = rs.getString("call_id");
                     Capped request = readCapped(rs, "request_json", maxChars);
                     Capped response = readCapped(rs, "response_json", maxChars);
-                    return slices.put(rs.getString("call_id"), new PayloadSlice(
-                            rs.getString("call_id"),
+                    return slices.put(callId, new PayloadSlice(callId,
                             request.text(), request.tooLarge(),
                             response.text(), response.tooLarge()));
                 })

@@ -160,9 +160,15 @@ public class CallStatsService {
      *
      * 调用量为 0 的网关也留在列表里：一个平时很忙的网关这段时间一条调用都没有，
      * 恰恰是最该看见的情况，把它从列表里去掉等于把问题藏起来。
+     *
+     * <p><b>刻意用不带网关过滤的窗口查。</b>这一块是跨网关的导航（界面上是"全部网关"表和
+     * "各网关调用量"图），选中某个网关之后它仍然要如实显示别的网关 —— 沿用被过滤的窗口，
+     * 表里会出现一排 0，而那些网关这段时间明明有流量；图上也只剩一根柱子，
+     * "点柱子切到那个网关"这个动作直接没了。被过滤的是总量、趋势、子 MCP、工具和错误码。
      */
     private List<GatewayStat> gateways(Window window) {
-        Map<String, Grouped> byId = this.stats.byGateway(window).stream()
+        Window allGateways = new Window(null, window.from(), window.to());
+        Map<String, Grouped> byId = this.stats.byGateway(allGateways).stream()
                 .collect(Collectors.toMap(Grouped::key, Function.identity(), (a, b) -> a));
 
         List<GatewayStat> result = new ArrayList<>();
@@ -172,7 +178,9 @@ public class CallStatsService {
             int failures = grouped == null ? 0 : grouped.failures();
             result.add(new GatewayStat(gateway.id(), gateway.name(), gateway.slug(),
                     gateway.status(), calls, failures,
-                    rate(calls - failures, calls),
+                    // 用真实的 SUCCESS 数，不是 calls - failures ——
+                    // 后者会把还没结束的 STARTED 算成成功，和上面的总成功率对不上
+                    rate(grouped == null ? 0 : grouped.successes(), calls),
                     grouped == null ? null : grouped.avgDurationMs(),
                     grouped == null ? null : grouped.p95DurationMs()));
         }
@@ -207,7 +215,8 @@ public class CallStatsService {
 
     private static NamedStat named(String id, String name, Grouped grouped) {
         return new NamedStat(id, name, grouped.calls(), grouped.failures(),
-                rate(grouped.calls() - grouped.failures(), grouped.calls()),
+                // 同上：STARTED 既不算成功也不算失败，不能用减法推
+                rate(grouped.successes(), grouped.calls()),
                 grouped.avgDurationMs(), grouped.p95DurationMs());
     }
 

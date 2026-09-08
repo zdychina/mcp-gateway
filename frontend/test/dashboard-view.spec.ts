@@ -158,6 +158,51 @@ describe('总览：时间窗与网关', () => {
     expect(daysBack).toBeCloseTo(7, 1)
   })
 
+  /*
+   * 连着切两次时间范围，慢的那个后回来不能盖掉新的 ——
+   * 否则标题写着 24 小时、数据却是 1 小时的，而且看不出哪里不对。
+   */
+  it('慢的那个响应后回来也盖不掉新的', async () => {
+    const view = await render()
+
+    let resolveSlow: (() => void) | null = null
+    statsApi.load.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveSlow = () => resolve(stats({
+        totals: {
+          calls: 1, success: 1, error: 0, timeout: 0, started: 0,
+          successRate: 1, avgDurationMs: 10, p95DurationMs: 10
+        }
+      }))
+    }))
+    statsApi.load.mockResolvedValueOnce(stats({
+      totals: {
+        calls: 999, success: 999, error: 0, timeout: 0, started: 0,
+        successRate: 1, avgDurationMs: 20, p95DurationMs: 20
+      }
+    }))
+
+    // 先点慢的那个，再点快的那个
+    await view.findAll('.chip-btn').find(button => button.text() === '1 小时')!.trigger('click')
+    await view.findAll('.chip-btn').find(button => button.text() === '7 天')!.trigger('click')
+    await flushPromises()
+
+    // 快的那个已经画上去了
+    expect(view.findAll('.stat-tile')[0].text()).toContain('999')
+
+    // 慢的那个这时才回来，必须被丢掉
+    resolveSlow!()
+    await flushPromises()
+
+    expect(view.findAll('.stat-tile')[0].text()).toContain('999')
+    expect(view.findAll('.stat-tile')[0].text()).not.toContain('最近 1 小时')
+  })
+
+  it('网关下拉有无障碍名称 —— 原生元素上得写 aria-label', async () => {
+    const view = await render()
+
+    expect(view.find('.scope-picker select').attributes('aria-label')).toBe('按网关筛选')
+  })
+
   it('选网关后带上 gatewayId，并画出子 MCP 拆分', async () => {
     const view = await render()
     // 没选网关时子 MCP 那块是提示，不是空图

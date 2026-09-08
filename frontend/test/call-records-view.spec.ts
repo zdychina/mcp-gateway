@@ -622,6 +622,68 @@ describe('正文抽取列', () => {
     expect(callRecordApi.search.mock.calls).toHaveLength(before)
   })
 
+  /**
+   * 上限只在"添加"那条路上拦是不够的。
+   *
+   * 加满四列、关掉两列、再加两列、然后把关掉的勾回来 —— 六列就这么绕过去了，
+   * 之后每次查询都是 400，而人根本猜不到病根在列配置上。
+   */
+  it('关掉再勾回来，同样绕不过四列上限', async () => {
+    const view = await render()
+    const rowFor = (text: string) =>
+      view.findAll('.col-list li').find(item => item.text().includes(text))!
+
+    for (const field of ['/a', '/b', '/c', '/d']) {
+      await addColumn(view, 'request', field, field)
+    }
+    // 关掉两列，再加两列 —— 此时可见的仍是四列，但一共有六列
+    await rowFor('request:/a').find('input[type="checkbox"]').trigger('change')
+    await rowFor('request:/b').find('input[type="checkbox"]').trigger('change')
+    await flushPromises()
+    await addColumn(view, 'request', '/e', '/e')
+    await addColumn(view, 'request', '/f', '/f')
+    expect(lastFilters().extract).toHaveLength(4)
+
+    const before = callRecordApi.search.mock.calls.length
+    const checkbox = rowFor('request:/a').find('input[type="checkbox"]')
+    await checkbox.trigger('change')
+    await flushPromises()
+
+    expect(view.find('.col-add .hint.warn').text()).toContain('4')
+    // 没有多发请求，复选框也被扳回去了 —— 否则会留下一个"勾着但没生效"的框
+    expect(callRecordApi.search.mock.calls).toHaveLength(before)
+    expect((checkbox.element as HTMLInputElement).checked).toBe(false)
+  })
+
+  /** 上限是后加的，浏览器里可能已经存着超额的配置，读回来要修一次。 */
+  it('存量配置超过上限时，加载后自己修掉', async () => {
+    const fields = ['/a', '/b', '/c', '/d', '/e', '/f']
+    window.localStorage.setItem('mcp-gateway.call-columns.gw-1.v1', JSON.stringify({
+      layout: ['startedAt', ...fields.map(field => `request:${field}`)],
+      custom: fields.map(field => ({
+        key: `request:${field}`, label: field,
+        extract: { source: 'request', pointer: field }
+      }))
+    }))
+
+    await render()
+
+    expect(lastFilters().extract).toHaveLength(4)
+  })
+
+  /*
+   * 服务端按逗号切开 columns / labels，所以"查询, 关键词"这种列名会被拆成两项，
+   * 导出时报"数量对不上"——而那条报错和刚才输的列名之间毫无线索可循。
+   */
+  it('列名里有逗号就在前端拦下来，并说清楚为什么', async () => {
+    const view = await render()
+
+    await addColumn(view, 'request', '/q', '查询, 关键词')
+
+    expect(view.find('.col-add .hint.warn').text()).toContain('逗号')
+    expect(lastFilters().extract).toBeUndefined()
+  })
+
   it('最多四列 —— 和服务端的上限对齐', async () => {
     const view = await render()
 
