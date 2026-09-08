@@ -107,9 +107,15 @@ public class DownstreamMcpService {
      *
      * 需求 6.3.6：改名会连带改掉所有聚合工具名，这是对 Agent 的破坏性变更。
      * 这里同步重算 exposed_name，保留启停状态和自定义描述。
+     *
+     * <p>这个方法只写配置，<b>不碰网络</b> —— 是否要重新拉一次工具列表由返回值告诉调用方，
+     * 同步本身放在 {@link DownstreamImportOrchestrator} 里做。理由和导入那条路一样：
+     * 把网络调用留在这个事务里，一个慢下游能把数据库连接占满 30 秒。
+     *
+     * @return 是否需要重新同步工具快照
      */
     @Transactional
-    public void update(String gatewayId, String downstreamId, UpdateDownstreamRequest request) {
+    public boolean update(String gatewayId, String downstreamId, UpdateDownstreamRequest request) {
         this.gatewayService.requireGateway(gatewayId);
         DownstreamMcp existing = requireDownstream(gatewayId, downstreamId);
 
@@ -128,14 +134,22 @@ public class DownstreamMcpService {
                 ? existing.encryptedHeadersJson()
                 : this.headerCodec.encrypt(request.headers());
 
+        String url = request.url().trim();
         Instant now = Instant.now();
-        this.downstreams.updateConfig(downstreamId, name, request.url().trim(), encryptedHeaders, now);
+        this.downstreams.updateConfig(downstreamId, name, url, encryptedHeaders, now);
 
         if (!existing.name().equals(name)) {
             renameExposedTools(downstreamId, name, now);
             log.warn("downstream {} renamed from {} to {}; every exposed tool name changed, "
                     + "which is a breaking change for connected agents", downstreamId, existing.name(), name);
         }
+
+        /*
+         * 换了地址或换了凭证，下游能给出的工具集就可能变了，快照必须重新拉一次 ——
+         * 不拉的话页面上一切正常，工具却还是旧那套，直到 Agent 调用一个已经不存在的工具
+         * 才暴露出来。只改名字不用拉：聚合工具名是本地按新名字重算的。
+         */
+        return !existing.url().equals(url) || request.headers() != null;
     }
 
     /** 需求 6.2.10：删除子 MCP 后其工具立即从快照移除，由外键级联完成。 */

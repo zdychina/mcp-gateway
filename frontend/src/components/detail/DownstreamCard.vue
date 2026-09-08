@@ -5,7 +5,7 @@ import { ApiError } from '../../api/client'
 import type { DownstreamMcp, GatewayDetail, SyncResult, UpdateDownstreamRequest } from '../../api/types'
 import { formatDateTime, formatRelative } from '../../utils/datetime'
 import { useAlerts } from '../../composables/useAlerts'
-import { describeSyncResult } from '../../utils/sync'
+import { AGENT_RELIST_HINT, describeSyncResult } from '../../utils/sync'
 import SyncStatusBadge from '../SyncStatusBadge.vue'
 
 const props = defineProps<{ gatewayId: string, downstream: DownstreamMcp }>()
@@ -71,10 +71,28 @@ async function save(): Promise<void> {
 
   busy.value = true
   try {
-    const detail = await downstreamApi.update(props.gatewayId, props.downstream.id, request)
-    alerts.success('子 MCP 已保存',
-      replaceHeaders.value ? '凭证已替换。' : '凭证保持不变（未勾选「替换 headers」）。')
-    emit('replaced', detail)
+    const result = await downstreamApi.update(props.gatewayId, props.downstream.id, request)
+
+    const credentials = replaceHeaders.value
+      ? '凭证已替换。'
+      : '凭证保持不变（未勾选「替换 headers」）。'
+
+    if (result.syncResult === null) {
+      // 只改了名字：没去摸下游，但工具名全变了
+      alerts.success('子 MCP 已保存', `${credentials}\n${AGENT_RELIST_HINT}`)
+    }
+    else if (result.syncResult.succeeded) {
+      alerts.success('子 MCP 已保存，工具已重新同步',
+        `${credentials}\n${describeSyncResult(result.syncResult)}\n${AGENT_RELIST_HINT}`)
+    }
+    else {
+      // 配置已经落库了，失败的只是同步 —— 需求 6.4.7 保留上一次成功的快照
+      alerts.warning('子 MCP 已保存，但重新同步失败',
+        `${credentials}\n${describeSyncResult(result.syncResult)}\n`
+        + '工具快照仍是上一次成功同步的内容。')
+    }
+
+    emit('replaced', result.gateway)
   }
   catch (error) {
     alerts.error('保存子 MCP 失败', describe(error))
@@ -89,7 +107,7 @@ async function sync(): Promise<void> {
   try {
     const result: SyncResult = await downstreamApi.sync(props.gatewayId, props.downstream.id)
     if (result.succeeded) {
-      alerts.success('同步成功', describeSyncResult(result))
+      alerts.success('同步成功', `${describeSyncResult(result)}\n${AGENT_RELIST_HINT}`)
     }
     else {
       // 同步失败不是请求失败：需求 6.4.7 保留上一次成功的快照
@@ -115,7 +133,8 @@ async function remove(): Promise<void> {
   busy.value = true
   try {
     const detail = await downstreamApi.remove(props.gatewayId, props.downstream.id)
-    alerts.success('子 MCP 已删除', `「${props.downstream.name}」的工具已从 tools/list 移除。`)
+    alerts.success('子 MCP 已删除',
+      `「${props.downstream.name}」的工具已从 tools/list 移除。\n${AGENT_RELIST_HINT}`)
     emit('replaced', detail)
   }
   catch (error) {
@@ -152,7 +171,8 @@ async function remove(): Promise<void> {
         </div>
       </div>
 
-      <form class="grid" @submit.prevent="save">
+      <form @submit.prevent="save">
+        <div class="form-grid">
         <div class="field">
           <label :for="`ds-name-${downstream.id}`">名称</label>
           <input :id="`ds-name-${downstream.id}`" v-model="form.name" class="control mono"
@@ -163,9 +183,10 @@ async function remove(): Promise<void> {
         <div class="field span-2">
           <label :for="`ds-url-${downstream.id}`">URL</label>
           <input :id="`ds-url-${downstream.id}`" v-model="form.url" class="control mono" required>
+          <span class="hint">改了地址或凭证会自动重新同步一次工具。</span>
         </div>
 
-        <div class="field">
+        <div class="field span-all">
           <label>
             Headers
             <span v-if="Object.keys(downstream.headers).length === 0" class="muted">（未配置）</span>
@@ -174,7 +195,7 @@ async function remove(): Promise<void> {
           <div v-for="(masked, name) in downstream.headers" :key="name" class="mono small muted">
             {{ name }}: {{ masked }}
           </div>
-          <label class="check">
+          <label class="check headers-toggle">
             <input v-model="replaceHeaders" type="checkbox">
             <span>替换 headers</span>
           </label>
@@ -183,9 +204,10 @@ async function remove(): Promise<void> {
                     aria-label="新的 headers JSON"></textarea>
           <span class="hint">不勾选就保持原有凭证不变；勾选后留空表示清空。</span>
         </div>
+        </div>
 
-        <div class="field justify-end">
-          <div class="btn-row">
+        <div class="form-actions">
+          <div class="actions-end">
             <button class="btn btn-primary btn-sm" type="submit" :disabled="busy">保存子 MCP</button>
           </div>
         </div>

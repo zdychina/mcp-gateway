@@ -1,8 +1,10 @@
 package com.mcpgateway.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.mcpgateway.api.dto.DownstreamUpdateResponse;
 import com.mcpgateway.api.dto.ImportResponse;
 import com.mcpgateway.api.dto.SyncResponse;
+import com.mcpgateway.api.dto.UpdateDownstreamRequest;
 import com.mcpgateway.downstream.ToolSyncService;
 import org.springframework.stereotype.Service;
 
@@ -43,6 +45,26 @@ public class DownstreamImportOrchestrator {
                 .toList();
 
         return new ImportResponse(this.gatewayService.detail(gatewayId), results);
+    }
+
+    /**
+     * 编辑子 MCP，改动落库之后按需重新同步一次。
+     *
+     * <p>和导入是同一个套路（需求 6.4.2 的延伸）：配置一定落库，同步单独报成败。
+     * 从前编辑完不同步，把 URL 指到另一个下游之后快照还是旧的，界面上却看不出任何异样。
+     */
+    public DownstreamUpdateResponse updateAndSync(String gatewayId, String downstreamId,
+            UpdateDownstreamRequest request) {
+
+        // 第一步：配置落库，事务在这个调用内部开始和结束。
+        boolean needsResync = this.downstreamService.update(gatewayId, downstreamId, request);
+
+        // 第二步：只在地址或凭证变了时才摸下游。失败不回滚配置，只如实报出来。
+        SyncResponse syncResult = needsResync
+                ? toResponse(this.syncService.sync(downstreamId))
+                : null;
+
+        return new DownstreamUpdateResponse(this.gatewayService.detail(gatewayId), syncResult);
     }
 
     public SyncResponse syncOne(String gatewayId, String downstreamId) {

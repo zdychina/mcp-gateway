@@ -1,6 +1,7 @@
 package com.mcpgateway.api;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.mcpgateway.api.dto.DownstreamUpdateResponse;
 import com.mcpgateway.api.dto.GatewayDetailResponse;
 import com.mcpgateway.api.dto.ImportResponse;
 import com.mcpgateway.api.dto.SyncResponse;
@@ -58,11 +59,16 @@ public class DownstreamMcpController {
         return ApiResponse.ok(this.importOrchestrator.syncOne(gatewayId, serverId));
     }
 
+    /**
+     * 编辑子 MCP。
+     *
+     * <p>改了 URL 或凭证会**自动重新同步一次**工具快照，结果放在 syncResult 里；
+     * 只改名字时 syncResult 为 null。响应形状与导入接口一致：配置一定落库，同步单独报成败。
+     */
     @PutMapping("/{serverId}")
-    public ApiResponse<GatewayDetailResponse> update(@PathVariable String gatewayId,
+    public ApiResponse<DownstreamUpdateResponse> update(@PathVariable String gatewayId,
             @PathVariable String serverId, @Valid @RequestBody UpdateDownstreamRequest request) {
-        this.downstreamService.update(gatewayId, serverId, request);
-        return ApiResponse.ok(this.gatewayService.detail(gatewayId));
+        return ApiResponse.ok(this.importOrchestrator.updateAndSync(gatewayId, serverId, request));
     }
 
     @DeleteMapping("/{serverId}")

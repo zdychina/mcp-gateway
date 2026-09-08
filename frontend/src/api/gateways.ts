@@ -1,6 +1,7 @@
 import { http } from './client'
 import type {
   AgentConfig,
+  DownstreamUpdateResult,
   CallRecordDetail,
   CallRecordFilters,
   CallRecordPage,
@@ -57,9 +58,15 @@ export const downstreamApi = {
   sync: (gatewayId: string, serverId: string) =>
     http.post<SyncResult>(`${base(gatewayId)}/mcp-servers/${encodeURIComponent(serverId)}/sync`),
 
-  /** headers 字段省略即保持原有凭证，见 UpdateDownstreamRequest 的说明。 */
+  /**
+   * headers 字段省略即保持原有凭证，见 UpdateDownstreamRequest 的说明。
+   *
+   * 改了 URL 或凭证时服务端会**自动重新同步一次**工具快照，结果在 syncResult 里；
+   * 只改名字时 syncResult 是 null。
+   */
   update: (gatewayId: string, serverId: string, request: UpdateDownstreamRequest) =>
-    http.put<GatewayDetail>(`${base(gatewayId)}/mcp-servers/${encodeURIComponent(serverId)}`, request),
+    http.put<DownstreamUpdateResult>(
+      `${base(gatewayId)}/mcp-servers/${encodeURIComponent(serverId)}`, request),
 
   /** 需求 6.2.10：工具快照由外键级联移除，立即从 tools/list 消失。 */
   remove: (gatewayId: string, serverId: string) =>

@@ -166,6 +166,56 @@ class ToolSyncIntegrationTest {
         assertThat(exposedNames(downstream.id())).containsExactly("kb_a__ping", "kb_a__search");
     }
 
+    /**
+     * 改了地址就得重新拉一次工具。
+     *
+     * 从前编辑完不同步：把 URL 指到另一个下游之后，快照还是旧那套工具，
+     * 界面上却看不出任何异样，直到 Agent 调用一个已经不存在的工具才暴露。
+     */
+    @Test
+    @DisplayName("改 URL 之后自动重新同步工具快照")
+    void updatingUrlResyncsTools() {
+        DownstreamMcp downstream = createDownstream("kb_a", MockDownstreamConfig.KB_B_PATH, Map.of());
+        this.syncService.sync(downstream.id());
+        assertThat(exposedNames(downstream.id())).containsExactly("kb_a__lookup", "kb_a__search");
+
+        String body = updateDownstream(downstream.id(), "kb_a", MockDownstreamConfig.KB_A_PATH);
+
+        assertThat(body).contains("\"success\":true");
+        // 同步结果跟着响应一起回来，和导入接口一个形状
+        assertThat(body).contains("\"syncResult\"").contains("\"succeeded\":true");
+        // 快照换成了新地址上的工具
+        assertThat(exposedNames(downstream.id())).containsExactly("kb_a__ping", "kb_a__search");
+    }
+
+    /** 只改名字不该去摸下游：聚合工具名是本地按新名字重算的。 */
+    @Test
+    @DisplayName("只改名字不触发同步")
+    void renamingDoesNotResync() {
+        DownstreamMcp downstream = createDownstream("kb_a", MockDownstreamConfig.KB_A_PATH, Map.of());
+        this.syncService.sync(downstream.id());
+        int before = this.mockKbA.receivedAuthorizationHeaders().size();
+
+        String body = updateDownstream(downstream.id(), "kb_alpha", MockDownstreamConfig.KB_A_PATH);
+
+        assertThat(body).contains("\"syncResult\":null");
+        assertThat(this.mockKbA.receivedAuthorizationHeaders()).hasSize(before);
+        // 工具名跟着新名字重算，但没有重新拉过下游
+        assertThat(exposedNames(downstream.id())).containsExactly("kb_alpha__ping", "kb_alpha__search");
+    }
+
+    /** 编辑用的 PUT。返回响应体原文，断言里直接看 JSON。 */
+    private String updateDownstream(String downstreamId, String name, String path) {
+        return this.restTemplate.exchange(
+                "/api/gateways/{gatewayId}/mcp-servers/{serverId}",
+                org.springframework.http.HttpMethod.PUT,
+                new org.springframework.http.HttpEntity<>(Map.of(
+                        "name", name,
+                        "url", "http://localhost:" + this.port + path)),
+                String.class,
+                this.gateway.id(), downstreamId).getBody();
+    }
+
     // ------------------------------------------------------------ 重新同步
 
     @Test

@@ -62,6 +62,21 @@
   --shadow: 0 1px 2px rgba(16, 24, 40, .05), 0 2px 8px -2px rgba(16, 24, 40, .06);
   --shadow-lg: 0 4px 12px -2px rgba(16, 24, 40, .1), 0 12px 28px -6px rgba(16, 24, 40, .1);
 
+  /*
+   * 输入控件单独一组令牌。
+   *
+   * 从前输入框用的是 --surface + --border-strong：底色和卡片一样、边框又浅，
+   * 白卡片上几乎看不出哪里能输入。这里给它自己的底色和更实的边框 ——
+   * 表单控件要"看起来能点"，这是它和普通容器最大的区别。
+   */
+  --field-bg: var(--gray-0);
+  --field-border: #cbd2db;
+  --field-border-hover: #aab3bf;
+  /* 极轻的内阴影，让输入框比卡片"凹"一点 */
+  --field-inset: inset 0 1px 2px rgba(16, 24, 40, .04);
+  /* 控件统一高度，按钮和输入框对齐靠它 */
+  --control-height: 2.25rem;
+
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei",
                "PingFang SC", "Hiragino Sans GB", Roboto, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
@@ -105,6 +120,12 @@
   --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 2px 8px -2px rgba(0, 0, 0, .35);
   --shadow-lg: 0 4px 12px -2px rgba(0, 0, 0, .4), 0 12px 28px -6px rgba(0, 0, 0, .45);
 
+  /* 暗色下输入框比卡片更深，"凹进去"的感觉靠明度差而不是阴影 */
+  --field-bg: #10141a;
+  --field-border: #39414e;
+  --field-border-hover: #4b5563;
+  --field-inset: inset 0 1px 2px rgba(0, 0, 0, .25);
+
   color-scheme: dark;
 }
 
@@ -137,6 +158,11 @@
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3);
     --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 2px 8px -2px rgba(0, 0, 0, .35);
     --shadow-lg: 0 4px 12px -2px rgba(0, 0, 0, .4), 0 12px 28px -6px rgba(0, 0, 0, .45);
+
+    --field-bg: #10141a;
+    --field-border: #39414e;
+    --field-border-hover: #4b5563;
+    --field-inset: inset 0 1px 2px rgba(0, 0, 0, .25);
 
     color-scheme: dark;
   }
@@ -278,6 +304,25 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   border-bottom-color: color-mix(in srgb, var(--warning) 28%, transparent);
 }
 
+/* 新增子 MCP：标题 + 输入方式切换 */
+.add-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-3); flex-wrap: wrap; margin-bottom: var(--sp-3);
+}
+.add-title { font-size: .88rem; }
+.mode-switch { display: inline-flex; gap: var(--sp-1); }
+
+/* headers 的键值对行：名 : 值 : 删。窄屏下让它们各占一行而不是挤成一条缝 */
+.header-row {
+  display: grid; gap: var(--sp-2); align-items: center;
+  grid-template-columns: minmax(8rem, 1fr) minmax(10rem, 2fr) auto;
+  margin-bottom: var(--sp-2);
+}
+@media (max-width: 640px) {
+  .header-row { grid-template-columns: 1fr auto; }
+  .header-row .control:first-child { grid-column: 1 / -1; }
+}
+
 /* 子 MCP 卡片嵌在"子 MCP 配置"那张卡里，压平一层免得层层叠叠 */
 .card.nested {
   box-shadow: none;
@@ -294,31 +339,53 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 
 /* ==================================================================== 表单 */
 
-.field { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
-.field label { font-weight: 500; font-size: .82rem; color: var(--text); }
-.field .hint { color: var(--text-subtle); font-size: .76rem; line-height: 1.45; }
+.field { display: flex; flex-direction: column; min-width: 0; }
+.field label {
+  margin-bottom: .35rem;
+  font-weight: 500; font-size: .8rem; line-height: 1.4; color: var(--text);
+}
+/*
+ * 说明文字固定挂在控件下方，不参与控件本身的行高。
+ *
+ * 从前它和控件是同级 flex 项、共用一个 gap，一段两行的警告会把这一列顶高，
+ * 同一行里别的字段就跟着错位 —— 详情页那颗浮在半空的"保存"按钮就是这么来的。
+ */
+.field .hint {
+  margin-top: .35rem;
+  color: var(--text-subtle); font-size: .75rem; line-height: 1.5;
+}
 .field .hint.warn { color: var(--warning); }
 
 .control {
   width: 100%;
-  padding: .42rem .6rem;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--surface);
+  min-height: var(--control-height);
+  padding: .45rem .7rem;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-sm);
+  background: var(--field-bg);
   color: var(--text);
-  font: inherit;
-  transition: border-color var(--transition), box-shadow var(--transition);
+  font: inherit; line-height: 1.45;
+  box-shadow: var(--field-inset);
+  transition: border-color var(--transition), box-shadow var(--transition),
+              background var(--transition);
 }
-.control::placeholder { color: var(--text-subtle); }
-.control:hover:not(:disabled):not([readonly]) { border-color: var(--gray-5); }
+.control::placeholder { color: var(--text-subtle); opacity: 1; }
+.control:hover:not(:disabled):not([readonly]) { border-color: var(--field-border-hover); }
 .control:focus {
   outline: none;
   border-color: var(--accent);
+  /* 聚焦时收掉内阴影：一个"凹"一个"发光"叠在一起会显脏 */
   box-shadow: 0 0 0 3px var(--accent-ring);
 }
-.control[readonly] { background: var(--surface-sunken); color: var(--text-muted); }
-.control:disabled { background: var(--surface-sunken); color: var(--text-subtle); cursor: not-allowed; }
-textarea.control { resize: vertical; line-height: 1.55; }
+.control[readonly] {
+  background: var(--surface-sunken); color: var(--text-muted);
+  box-shadow: none; cursor: default;
+}
+.control:disabled {
+  background: var(--surface-sunken); color: var(--text-subtle);
+  box-shadow: none; cursor: not-allowed;
+}
+textarea.control { padding-top: .5rem; resize: vertical; line-height: 1.6; }
 
 /* 原生下拉的箭头各家不一样，自己画一个 */
 select.control {
@@ -335,17 +402,50 @@ select.control {
   font-size: .82rem; font-weight: 400; cursor: pointer; user-select: none;
 }
 .check input { margin: 0; accent-color: var(--accent); width: .95rem; height: .95rem; }
+/* 勾上之后下面会长出一个 textarea，两者之间要留口气 */
+.headers-toggle { margin: .35rem 0 .5rem; }
 
 .input-group { display: flex; gap: var(--sp-2); align-items: stretch; }
 .input-group .control { flex: 1; min-width: 0; }
+
+/*
+ * 表单布局。
+ *
+ * 关键是把"字段"和"操作"分开：从前按钮是网格里的一个格子，字段一高一矮就把它顶得
+ * 浮在半空，而且破坏性操作和保存挤在一起。现在操作永远独立成一行 ——
+ * 主操作靠右，破坏性操作靠左，中间隔开。
+ */
+.form-grid {
+  display: grid; gap: var(--sp-4);
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  /* 每个字段各自按内容高度排，一列的警告文字不再顶高整行 */
+  align-items: start;
+}
+.form-grid .span-2 { grid-column: span 2; }
+.form-grid .span-all { grid-column: 1 / -1; }
+@media (max-width: 720px) {
+  .form-grid .span-2 { grid-column: span 1; }
+}
+
+.form-actions {
+  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+  margin-top: var(--sp-4); padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+/* 嵌套卡片自己就是一圈边界了，里面再来一条横线只是噪音 */
+.card.nested .form-actions { border-top: none; padding-top: var(--sp-2); }
+/* 主操作永远贴右，即便左边没有危险操作 */
+.form-actions .actions-end { margin-left: auto; display: flex; gap: var(--sp-2); align-items: center; }
 
 /* ================================================================== 按钮 */
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2);
-  padding: .42rem .8rem;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
+  /* 和输入框同高，放在一行里不会高低不齐 */
+  min-height: var(--control-height);
+  padding: .45rem .9rem;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
   font: inherit; font-weight: 500;
@@ -353,7 +453,9 @@ select.control {
   transition: background var(--transition), border-color var(--transition),
               color var(--transition), box-shadow var(--transition);
 }
-.btn:hover:not(:disabled) { background: var(--surface-sunken); border-color: var(--gray-5); }
+.btn:hover:not(:disabled) {
+  background: var(--surface-sunken); border-color: var(--field-border-hover);
+}
 .btn:active:not(:disabled) { transform: translateY(.5px); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn svg { flex: none; }
@@ -364,7 +466,7 @@ select.control {
 }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
 
-.btn-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+.btn-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 22%, transparent); }
 .btn-danger:hover:not(:disabled) {
   background: var(--danger-soft); border-color: var(--danger); color: var(--danger);
 }
@@ -372,7 +474,10 @@ select.control {
 .btn-link { border-color: transparent; background: transparent; color: var(--accent); }
 .btn-link:hover:not(:disabled) { background: var(--accent-soft); border-color: transparent; }
 
-.btn-sm { padding: .24rem .55rem; font-size: .8rem; border-radius: var(--radius-sm); }
+.btn-sm {
+  min-height: 1.9rem; padding: .25rem .65rem;
+  font-size: .8rem; border-radius: var(--radius-sm);
+}
 .btn-icon { padding: .35rem; width: 2rem; height: 2rem; }
 
 .btn-row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
@@ -568,11 +673,23 @@ table.table.tools { table-layout: fixed; min-width: 46rem; }
 .table.tools .synced { white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 .table.tools .origin-desc {
-  margin: 0 0 var(--sp-2);
+  margin: 0;
   color: var(--text-muted); font-size: .8rem; line-height: 1.5;
-  /* 下游描述长短悬殊，截到三行，行高才能大致一致；全文在 title 里 */
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3;
+  /* 下游描述长短悬殊，截到两行，行高才能大致一致；全文在 title 里 */
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
   overflow: hidden;
+}
+/* 编辑态下原始描述是参照物，和输入框之间要留白 */
+.table.tools .origin-desc + textarea.control { margin-top: var(--sp-2); }
+/* "自定义"这一档用强调色，扫一眼就知道哪些工具被人改过描述 */
+.table.tools .origin-desc .label.custom {
+  color: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  background: var(--accent-soft);
+}
+/* 收起态的编辑入口：贴着描述，不占额外行高 */
+.table.tools .desc-edit {
+  margin-top: .15rem; min-height: auto;
+  padding: 0 .3rem 0 0; font-size: .76rem;
 }
 .table.tools .origin-desc .label {
   display: inline-block; margin-right: .4rem;

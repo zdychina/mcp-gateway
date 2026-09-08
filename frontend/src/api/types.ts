@@ -142,6 +142,17 @@ export interface ImportResult {
 }
 
 /**
+ * 编辑子 MCP 的结果。
+ *
+ * 形状与导入一致：配置一定落库，同步单独报成败。
+ * syncResult 为 null 表示这次没同步 —— 只改名字时不需要拉下游，聚合工具名是本地重算的。
+ */
+export interface DownstreamUpdateResult {
+  gateway: GatewayDetail
+  syncResult: SyncResult | null
+}
+
+/**
  * 编辑子 MCP。
  *
  * headers 的三态是这个接口最容易用错的地方：

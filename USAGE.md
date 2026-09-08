@@ -334,7 +334,8 @@ Agent 在 `tools/list` 里看到的就是这个值。清除自定义描述会回
 同步失败不会让工具消失（需求 6.4.7）。导入时同理：配置一定整批落库，同步则逐个成败，
 页面会把两件事分开说。
 
-**聚合工具** —— 按子 MCP 分组，逐个启停、覆盖描述。启停立即生效，不需要重启或重新同步。
+**聚合工具** —— 按子 MCP 分组，逐个启停、覆盖描述。启停立即生效，不需要重启或重新同步
+（"立即"指网关这边；已连接的 Agent 要重新拉一次 `tools/list` 才看得到，见下）。
 停用的工具整行会压暗。描述留空保存表示清除自定义描述、回退到下游的原始描述。
 
 **Agent 接入** —— 复制 MCP 地址和接入 JSON；轮换令牌（新令牌在此当场显示一次，旧令牌立即失效）。
@@ -533,7 +534,25 @@ curl http://127.0.0.1:8080/api/gateways
 
 改名会连带改掉**所有**聚合工具名，对 Agent 是破坏性变更（启停状态和自定义描述会保留）。
 
-响应是更新后的完整 `GatewayDetailResponse`。
+**改了 `url` 或 `headers` 会自动重新同步一次工具快照**：那两样一变，下游能给出的工具集
+本来就可能不一样，不重新拉的话页面上一切正常、快照却还是旧那套，直到 Agent 调用一个
+已经不存在的工具才暴露。只改 `name` 不会同步 —— 聚合工具名是本地按新名字重算的。
+
+响应与导入接口同形：配置一定落库，同步单独报成败（需求 6.2.9）。
+
+```json
+{
+  "gateway": { "...": "更新后的完整 GatewayDetailResponse" },
+  "syncResult": {
+    "downstreamName": "wiki", "succeeded": true,
+    "added": 2, "updated": 0, "unchanged": 5, "removed": 1,
+    "errorCode": null, "errorMessage": null
+  }
+}
+```
+
+`syncResult` 为 `null` 表示这次没同步（只改了名字）。同步失败时 `succeeded` 是 `false`，
+**但配置已经保存**，工具快照保留上一次成功同步的内容（需求 6.4.7）。
 
 #### `DELETE /api/gateways/{id}/mcp-servers/{serverId}` — 删除
 
@@ -788,6 +807,12 @@ Accept: application/json, text/event-stream
 `initialize` 返回的 `instructions` 就是网关的**描述**字段。
 
 网关的 SDK server **不注册任何工具** —— 工具目录由网关自己每次从数据库读，所以启停、重新同步、改描述都立即生效，不需要重建 MCP 上下文。
+
+> **"立即生效"是服务端视角。** 网关不发 `notifications/tools/list_changed` ——
+> 无状态的 streamable-http 下没有可以往回推的长连接，而按需求 16.1 这里也不该长成一套
+> 自研 MCP 协议栈。所以变更对 Agent 生效的时机是**它下一次调 `tools/list`**，
+> 而多数客户端只在建立连接时拉一次：实际操作中往往需要让 Agent 重连。
+> 管理界面在改动工具集之后会提示这一点。
 
 ### 6.3 调用结果与错误
 

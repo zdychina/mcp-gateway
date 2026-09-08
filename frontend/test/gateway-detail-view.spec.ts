@@ -107,6 +107,14 @@ async function render() {
   return view
 }
 
+/** 新增子 MCP 默认是表单模式，粘 JSON 的用例得先切过去。 */
+async function toJsonMode(view: ReturnType<typeof mount>) {
+  await view.findAll('.mode-switch button')
+    .find(button => button.text().includes('JSON'))!
+    .trigger('click')
+}
+
+
 type View = Awaited<ReturnType<typeof render>>
 
 /** 子 MCP 的编辑表单。 */
@@ -164,7 +172,7 @@ describe('需求 12.4：headers 只显示遮罩值，且默认不回传', () => 
   })
 
   it('不勾「替换 headers」时，请求体里根本没有 headers 字段', async () => {
-    downstreamApi.update.mockResolvedValue(detail())
+    downstreamApi.update.mockResolvedValue({ gateway: detail(), syncResult: null })
     const view = await render()
 
     await downstreamForm(view).trigger('submit')
@@ -178,7 +186,7 @@ describe('需求 12.4：headers 只显示遮罩值，且默认不回传', () => 
   })
 
   it('勾选并填入内容时整体替换', async () => {
-    downstreamApi.update.mockResolvedValue(detail())
+    downstreamApi.update.mockResolvedValue({ gateway: detail(), syncResult: null })
     const view = await render()
 
     await view.find('.check input[type="checkbox"]').setValue(true)
@@ -192,7 +200,7 @@ describe('需求 12.4：headers 只显示遮罩值，且默认不回传', () => 
   })
 
   it('勾选后留空表示清空，且要二次确认', async () => {
-    downstreamApi.update.mockResolvedValue(detail())
+    downstreamApi.update.mockResolvedValue({ gateway: detail(), syncResult: null })
     const view = await render()
 
     await view.find('.check input[type="checkbox"]').setValue(true)
@@ -221,8 +229,12 @@ describe('需求 6.5.5：自定义描述的三态', () => {
     toolApi.update.mockResolvedValue(tool({ customDescription: '运营写的提示词' }))
     const view = await render()
 
+    // 描述编辑器默认收起，先点开那一行的入口
+    await view.findAll('tr').find(row => row.text().includes('kb_a__search'))!
+      .find('.desc-edit').trigger('click')
     await view.find('textarea[aria-label="kb_a__search 的自定义描述"]').setValue('运营写的提示词')
-    await view.find('.table.tools button').trigger('click')
+    // 编辑态里有"取消"和"保存"两个按钮，要点准那个主按钮
+    await view.find('.table.tools .desc-actions .btn-primary').trigger('click')
     await flushPromises()
 
     expect(toolApi.update).toHaveBeenCalledWith('gw-1', 'tool-1',
@@ -235,8 +247,12 @@ describe('需求 6.5.5：自定义描述的三态', () => {
     toolApi.update.mockResolvedValue(tool({ customDescription: null }))
     const view = await render()
 
+    // 描述编辑器默认收起，先点开那一行的入口
+    await view.findAll('tr').find(row => row.text().includes('kb_a__search'))!
+      .find('.desc-edit').trigger('click')
     await view.find('textarea[aria-label="kb_a__search 的自定义描述"]').setValue('   ')
-    await view.find('.table.tools button').trigger('click')
+    // 编辑态里有"取消"和"保存"两个按钮，要点准那个主按钮
+    await view.find('.table.tools .desc-actions .btn-primary').trigger('click')
     await flushPromises()
 
     // 必须是 null 而不是 undefined —— 后者会被 JSON.stringify 丢掉，
@@ -304,9 +320,180 @@ describe('需求 6.4.7：同步失败保留上一次成功的快照', () => {
     await view.find('.card.nested .card-header button').trigger('click')
     await flushPromises()
 
-    expect(useAlerts().items[0].detail).toBe('kb_a：新增 3，更新 1，未变 2，移除 1')
+    expect(useAlerts().items[0].detail).toContain('kb_a：新增 3，更新 1，未变 2，移除 1')
+    // 网关这边立即生效，但 Agent 那边要重新拉一次才看得到 —— 不说这句会以为改完就完了
+    expect(useAlerts().items[0].detail).toContain('重新拉取工具列表')
     // 同步接口只返回统计，工具快照变了必须重新取
     expect(gatewayApi.detail).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('编辑子 MCP 后自动重新同步', () => {
+  /*
+   * 从前编辑完不同步：把 URL 指到另一个下游之后，快照还是旧那套工具，
+   * 界面上却看不出任何异样。
+   */
+  it('同步成功时把增删改统计一起报出来', async () => {
+    downstreamApi.update.mockResolvedValue({
+      gateway: detail(),
+      syncResult: {
+        downstreamId: 'ds-1', downstreamName: 'kb_a', succeeded: true,
+        added: 2, updated: 0, unchanged: 1, removed: 3, errorCode: null, errorMessage: null
+      }
+    })
+    const view = await render()
+
+    await view.find('.card.nested .card-body form').trigger('submit')
+    await flushPromises()
+
+    const alert = useAlerts().items[0]
+    expect(alert.kind).toBe('success')
+    expect(alert.title).toContain('重新同步')
+    expect(alert.detail).toContain('移除 3')
+  })
+
+  /** 同步失败不是保存失败：配置已经落库，旧快照还在（需求 6.4.7）。 */
+  it('同步失败时说清楚配置已保存、快照还是旧的', async () => {
+    downstreamApi.update.mockResolvedValue({
+      gateway: detail(),
+      syncResult: {
+        downstreamId: 'ds-1', downstreamName: 'kb_a', succeeded: false,
+        added: 0, updated: 0, unchanged: 0, removed: 0,
+        errorCode: 'DOWNSTREAM_UNREACHABLE', errorMessage: 'connection refused'
+      }
+    })
+    const view = await render()
+
+    await view.find('.card.nested .card-body form').trigger('submit')
+    await flushPromises()
+
+    const alert = useAlerts().items[0]
+    expect(alert.kind).toBe('warning')
+    expect(alert.title).toContain('已保存')
+    expect(alert.detail).toContain('上一次成功同步')
+  })
+})
+
+describe('新增子 MCP：表单和 JSON 两种输入方式', () => {
+  /** 切到表单模式（默认就是，但用例里显式一下更清楚）。 */
+  async function toFormMode(view: ReturnType<typeof mount>) {
+    await view.findAll('.mode-switch button')
+      .find(button => button.text().includes('表单'))!
+      .trigger('click')
+  }
+
+  it('填表单也能新增，最终走的是同一个导入接口', async () => {
+    const view = await render()
+
+    await view.find('#new-ds-name').setValue('wiki')
+    await view.find('#new-ds-url').setValue('https://wiki.example.com/mcp')
+    await view.findAll('.header-row input')[0].setValue('Authorization')
+    await view.findAll('.header-row input')[1].setValue('Bearer t0ken')
+    await view.find('#import-form').trigger('submit')
+    await flushPromises()
+
+    expect(downstreamApi.import).toHaveBeenCalledWith('gw-1', {
+      mcpServers: {
+        wiki: {
+          type: 'streamable-http',
+          url: 'https://wiki.example.com/mcp',
+          headers: { Authorization: 'Bearer t0ken' }
+        }
+      }
+    })
+  })
+
+  /** 留着的空行是给下次输入用的，不该变成一个空 header 发出去。 */
+  it('没填名字的 header 行会被丢掉', async () => {
+    const view = await render()
+
+    await view.find('#new-ds-name').setValue('wiki')
+    await view.find('#new-ds-url').setValue('https://wiki.example.com/mcp')
+    await view.find('#import-form').trigger('submit')
+    await flushPromises()
+
+    const body = downstreamApi.import.mock.calls[0][1] as
+      { mcpServers: Record<string, Record<string, unknown>> }
+    expect(body.mcpServers.wiki).not.toHaveProperty('headers')
+  })
+
+  it('名称或 URL 没填就不发请求', async () => {
+    const view = await render()
+
+    await view.find('#new-ds-name').setValue('wiki')
+    await view.find('#import-form').trigger('submit')
+    await flushPromises()
+
+    expect(downstreamApi.import).not.toHaveBeenCalled()
+    expect(useAlerts().items[0].title).toContain('都要填')
+  })
+
+  /*
+   * 两种方式是同一份数据的两种视图 —— 切过去要看得到刚才填的东西，
+   * 而不是一个空框。
+   */
+  it('表单切到 JSON 会带着刚填的内容过去', async () => {
+    const view = await render()
+
+    await view.find('#new-ds-name').setValue('wiki')
+    await view.find('#new-ds-url').setValue('https://wiki.example.com/mcp')
+    await toJsonMode(view)
+
+    const json = (view.find('#import-json').element as HTMLTextAreaElement).value
+    expect(JSON.parse(json)).toEqual({
+      mcpServers: { wiki: { type: 'streamable-http', url: 'https://wiki.example.com/mcp' } }
+    })
+  })
+
+  it('JSON 切回表单会回填', async () => {
+    const view = await render()
+
+    await toJsonMode(view)
+    await view.find('#import-json').setValue(JSON.stringify({
+      mcpServers: {
+        wiki: {
+          type: 'streamable-http', url: 'https://wiki.example.com/mcp',
+          headers: { Authorization: 'Bearer t0ken' }
+        }
+      }
+    }))
+    await toFormMode(view)
+
+    expect((view.find('#new-ds-name').element as HTMLInputElement).value).toBe('wiki')
+    expect((view.find('#new-ds-url').element as HTMLInputElement).value)
+      .toBe('https://wiki.example.com/mcp')
+    expect((view.findAll('.header-row input')[0].element as HTMLInputElement).value)
+      .toBe('Authorization')
+  })
+
+  /** 表单一次只描述一个，硬塞进去必然丢东西，不如说清楚、留在 JSON 模式。 */
+  it('JSON 里有多个子 MCP 时不切过去，并说明原因', async () => {
+    const view = await render()
+
+    await toJsonMode(view)
+    await view.find('#import-json').setValue(JSON.stringify({
+      mcpServers: {
+        a: { type: 'streamable-http', url: 'https://a.example.com/mcp' },
+        b: { type: 'streamable-http', url: 'https://b.example.com/mcp' }
+      }
+    }))
+    await toFormMode(view)
+
+    // 还在 JSON 模式
+    expect(view.find('#import-json').exists()).toBe(true)
+    expect(view.find('#new-ds-name').exists()).toBe(false)
+    expect(useAlerts().items[0].detail).toContain('2 个')
+  })
+
+  it('JSON 解析不了时不切过去', async () => {
+    const view = await render()
+
+    await toJsonMode(view)
+    await view.find('#import-json').setValue('{ 坏掉的')
+    await toFormMode(view)
+
+    expect(view.find('#import-json').exists()).toBe(true)
+    expect(useAlerts().items[0].detail).toContain('解析不了')
   })
 })
 
@@ -328,6 +515,7 @@ describe('需求 6.2.9 / 6.4.2：导入后立即同步，单个失败不影响�
     })
     const view = await render()
 
+    await toJsonMode(view)
     await view.find('#import-json').setValue('{"mcpServers":{}}')
     await view.find('#import-form').trigger('submit')
     await flushPromises()
@@ -345,6 +533,7 @@ describe('需求 6.2.9 / 6.4.2：导入后立即同步，单个失败不影响�
 
     // 带 command 的 stdio 配置必须原样送到服务端，由它报 UNSUPPORTED_TRANSPORT；
     // 前端要是先绑一层模型，这个字段会被悄悄吃掉，用户就会看到"导入成功"
+    await toJsonMode(view)
     await view.find('#import-json').setValue('{"mcpServers":{"x":{"command":"node"}}}')
     await view.find('#import-form').trigger('submit')
     await flushPromises()
@@ -356,6 +545,7 @@ describe('需求 6.2.9 / 6.4.2：导入后立即同步，单个失败不影响�
   it('JSON 格式错误时不发请求', async () => {
     const view = await render()
 
+    await toJsonMode(view)
     await view.find('#import-json').setValue('{ 坏掉的')
     await view.find('#import-form').trigger('submit')
     await flushPromises()
@@ -378,7 +568,7 @@ describe('破坏性变更要二次确认', () => {
   })
 
   it('改子 MCP 名会说明所有聚合工具名都会变', async () => {
-    downstreamApi.update.mockResolvedValue(detail())
+    downstreamApi.update.mockResolvedValue({ gateway: detail(), syncResult: null })
     const view = await render()
 
     await view.find('.card.nested input.mono').setValue('kb_renamed')

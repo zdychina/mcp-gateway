@@ -196,7 +196,10 @@ class DownstreamMcpApiTest extends AbstractApiTest {
                         {"name":"kb_alpha","url":"http://127.0.0.1:1/a/mcp"}
                         """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.downstreams[?(@.name=='kb_alpha')]").exists());
+                // 响应形状与导入接口一致：{gateway, syncResult}
+                .andExpect(jsonPath("$.data.gateway.downstreams[?(@.name=='kb_alpha')]").exists())
+                // 只改名字不触发同步
+                .andExpect(jsonPath("$.data.syncResult").doesNotExist());
 
         assertThat(this.tools.findByDownstreamMcpId(kbA.id()))
                 .extracting(GatewayTool::exposedName)

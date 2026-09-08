@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { gatewayApi } from '../../api/gateways'
 import { ApiError } from '../../api/client'
 import type { GatewayDetail } from '../../api/types'
@@ -13,6 +13,9 @@ const alerts = useAlerts()
 const busy = ref(false)
 
 const form = ref({ name: '', slug: '', description: '' })
+
+/** slug 被改过才提示后果 —— 常驻一段红字，看久了就没人看了。 */
+const slugChanged = computed(() => form.value.slug !== props.gateway.slug)
 
 // 保存成功后父组件会把新的 gateway 传下来，表单跟着回到"已保存"的状态
 watch(() => props.gateway, gateway => {
@@ -82,27 +85,35 @@ async function remove(): Promise<void> {
       <StatusBadge :status="gateway.status" />
     </div>
     <div class="card-body">
-      <form id="gateway-form" class="grid" @submit.prevent="save">
-        <div class="field">
-          <label for="gw-name">名称</label>
-          <input id="gw-name" v-model="form.name" class="control" maxlength="64" required>
+      <form id="gateway-form" @submit.prevent="save">
+        <div class="form-grid">
+          <div class="field">
+            <label for="gw-name">名称</label>
+            <input id="gw-name" v-model="form.name" class="control" maxlength="64" required>
+          </div>
+          <div class="field">
+            <label for="gw-slug">标识 slug</label>
+            <input id="gw-slug" v-model="form.slug" class="control mono" maxlength="64"
+                   pattern="[A-Za-z0-9_-]{1,64}" required>
+            <!-- 只在真的改了才警告：常驻一段红字，看久了就没人看了 -->
+            <span v-if="slugChanged" class="hint warn">
+              改动会改变 Agent 的 MCP 地址，已接入的 Agent 需要更新配置。
+            </span>
+            <span v-else class="hint">决定 MCP 地址：<code>/mcp/{{ gateway.slug }}</code></span>
+          </div>
+          <div class="field span-all">
+            <label for="gw-description">描述</label>
+            <textarea id="gw-description" v-model="form.description" class="control"
+                      rows="2" maxlength="4000"></textarea>
+            <span class="hint">作为 instructions 传给 Agent</span>
+          </div>
         </div>
-        <div class="field">
-          <label for="gw-slug">标识 slug</label>
-          <input id="gw-slug" v-model="form.slug" class="control mono" maxlength="64"
-                 pattern="[A-Za-z0-9_-]{1,64}" required>
-          <span class="hint warn">改动会改变 Agent 的 MCP 地址，已接入的 Agent 需要更新配置。</span>
-        </div>
-        <div class="field">
-          <label for="gw-description">描述</label>
-          <textarea id="gw-description" v-model="form.description" class="control"
-                    rows="2" maxlength="4000"></textarea>
-          <span class="hint">作为 instructions 传给 Agent</span>
-        </div>
-        <div class="field justify-end">
-          <div class="btn-row split">
+
+        <!-- 删除靠左、保存靠右：破坏性操作不该和常规操作挨着，手一滑就点错 -->
+        <div class="form-actions">
+          <button class="btn btn-danger" type="button" :disabled="busy" @click="remove">删除网关</button>
+          <div class="actions-end">
             <button class="btn btn-primary" type="submit" :disabled="busy">保存</button>
-            <button class="btn btn-danger" type="button" :disabled="busy" @click="remove">删除网关</button>
           </div>
         </div>
       </form>
