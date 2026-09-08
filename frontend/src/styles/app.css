@@ -580,7 +580,28 @@ table.table { width: 100%; border-collapse: collapse; }
 }
 .alert-close:hover { color: var(--text); }
 
-.alert.compact { margin-bottom: 0; padding: .45rem var(--sp-3); box-shadow: none; }
+/*
+ * 卡片内的行内提示。
+ *
+ * 刻意**不复用 .alert** —— 那是全局提示栈（AlertStack）的类名。两者长得像，但含义不同：
+ * .alert 说的是"刚刚发生了什么"，会自己消失；.notice 说的是"这条记录现在是什么状态"，
+ * 一直在。混用同一个类名，任何按 .alert 找元素的代码都会抓错东西 ——
+ * 写冒烟测试时就被绊过一次：脚本等"保存成功"的提示，抓到的却是卡片里那条常驻的同步错误。
+ */
+.notice {
+  margin: 0;
+  padding: .45rem var(--sp-3);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-size: .82rem; line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.notice-danger {
+  border-left-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
 
 /* ============================================================== 状态与占位 */
 
@@ -617,6 +638,24 @@ table.table { width: 100%; border-collapse: collapse; }
 
 .toolbar { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-3); }
 .toolbar .search { flex: 1; min-width: 200px; max-width: 340px; }
+
+/* 列表卡片的头：搜索在左、计数在右 */
+.list-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-3); flex-wrap: wrap;
+  font-weight: 400;
+}
+.list-head .search { flex: 1; min-width: 200px; max-width: 22rem; }
+
+/* 表格下面的汇总行，给这张卡一个收口 */
+.list-foot { border-top: 1px solid var(--border); padding-top: var(--sp-3); padding-bottom: var(--sp-3); }
+
+/* MCP 地址挺长，截断显示，全文在 title 和复制按钮里 */
+.mcp-url { white-space: nowrap; }
+.mcp-url span {
+  display: inline-block; max-width: 18rem; vertical-align: bottom;
+  overflow: hidden; text-overflow: ellipsis;
+}
 
 /* ============================================================== 启停开关 */
 

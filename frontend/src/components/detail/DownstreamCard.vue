@@ -165,11 +165,13 @@ async function remove(): Promise<void> {
     </div>
 
     <div class="card-body stack">
-      <div v-if="downstream.lastSyncError" class="alert alert-danger compact">
-        <div class="alert-body">
-          <div class="alert-detail">{{ downstream.lastSyncError }}</div>
-        </div>
-      </div>
+      <!--
+        行内提示，不是全局提示栈那套（见 .notice 的说明）：这里说的是"这个子 MCP
+        现在的状态"，不是"刚刚发生了什么"。
+      -->
+      <p v-if="downstream.lastSyncError" class="notice notice-danger">
+        {{ downstream.lastSyncError }}
+      </p>
 
       <form @submit.prevent="save">
         <div class="form-grid">

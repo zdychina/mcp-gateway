@@ -62,6 +62,13 @@ async function render(rows: GatewaySummary[]) {
   return mountView()
 }
 
+/** 取第一行里某一列的单元格。按表头名字找，加列删列都不会让断言错位。 */
+function cellUnder(view: ReturnType<typeof mount>, header: string) {
+  const index = view.findAll('thead th').findIndex(th => th.text() === header)
+  return view.findAll('tbody tr')[0].findAll('td')[index]
+}
+
+
 describe('需求 10.1：网关列表页', () => {
   it('展示名称、slug、状态、子 MCP 数量、工具数量和更新时间', async () => {
     const view = await render([gateway()])
@@ -72,11 +79,13 @@ describe('需求 10.1：网关列表页', () => {
     expect(text).toContain('READY')
     expect(text).toContain('网关用途说明')
 
-    const cells = view.findAll('tbody td')
-    expect(cells[3].text()).toBe('2')
-    expect(cells[4].text()).toBe('7')
+    // 按表头取列，不按下标 —— 加一列就得改一次断言的写法迟早会出错
+    expect(cellUnder(view, '子 MCP').text()).toBe('2')
+    expect(cellUnder(view, '工具').text()).toBe('7')
     // 更新时间以相对时间展示，绝对时间放 title 备查
-    expect(cells[5].attributes('title')).toMatch(/^2026-08-31 /)
+    expect(cellUnder(view, '更新时间').attributes('title')).toMatch(/^2026-08-31 /)
+    // MCP 地址直接列出来，配 Agent 时不用点进详情页
+    expect(cellUnder(view, 'MCP 地址').text()).toContain('/mcp/')
   })
 
   it('指向详情页的链接走前端路由，href 仍是 /ui/ 下的真实地址', async () => {

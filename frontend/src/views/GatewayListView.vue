@@ -5,6 +5,7 @@ import { ApiError } from '../api/client'
 import type { GatewaySummary } from '../api/types'
 import { formatDateTime, formatRelative } from '../utils/datetime'
 import { useAlerts } from '../composables/useAlerts'
+import CopyButton from '../components/CopyButton.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import TokenReveal from '../components/TokenReveal.vue'
 import AppIcon from '../components/AppIcon.vue'
@@ -25,6 +26,18 @@ const freshToken = ref<string | null>(null)
 const form = ref({ name: '', slug: '', description: '' })
 
 const SLUG_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
+
+/**
+ * 底部那行汇总。
+ *
+ * 两个网关的时候这张表只有两行、下面一大片空白 —— 一句汇总不占地方，
+ * 又把"这就是全部了"说清楚，比留一条突兀的边界好。
+ */
+const totals = computed(() => ({
+  gateways: gateways.value.length,
+  downstreams: gateways.value.reduce((sum, item) => sum + item.downstreamCount, 0),
+  tools: gateways.value.reduce((sum, item) => sum + item.toolCount, 0)
+}))
 
 const filtered = computed(() => {
   const needle = keyword.value.trim().toLowerCase()
@@ -131,28 +144,30 @@ async function remove(gateway: GatewaySummary): Promise<void> {
   <div v-if="showCreate" class="card">
     <div class="card-header">创建网关</div>
     <div class="card-body stack">
-      <form class="grid" @submit.prevent="submitCreate">
-        <div class="field">
-          <label for="create-name">名称</label>
-          <input id="create-name" v-model="form.name" class="control" maxlength="64" required>
-          <span class="hint">1–64 个字符</span>
+      <form @submit.prevent="submitCreate">
+        <div class="form-grid">
+          <div class="field">
+            <label for="create-name">名称</label>
+            <input id="create-name" v-model="form.name" class="control" maxlength="64" required>
+            <span class="hint">1–64 个字符</span>
+          </div>
+          <div class="field">
+            <label for="create-slug">标识 slug</label>
+            <input id="create-slug" v-model="form.slug" class="control mono" maxlength="64" required>
+            <span class="hint">字母、数字、短横线和下划线；决定 Agent 的 MCP 地址</span>
+          </div>
+          <div class="field span-all">
+            <label for="create-description">描述（可选）</label>
+            <input id="create-description" v-model="form.description" class="control" maxlength="4000">
+            <span class="hint">会作为 instructions 传给 Agent</span>
+          </div>
         </div>
-        <div class="field">
-          <label for="create-slug">标识 slug</label>
-          <input id="create-slug" v-model="form.slug" class="control mono" maxlength="64" required>
-          <span class="hint">字母、数字、短横线和下划线；决定 Agent 的 MCP 地址</span>
-        </div>
-        <div class="field">
-          <label for="create-description">描述（可选）</label>
-          <input id="create-description" v-model="form.description" class="control" maxlength="4000">
-          <span class="hint">会作为 instructions 传给 Agent</span>
-        </div>
-        <div class="field" style="justify-content: flex-end">
-          <div class="btn-row">
+        <div class="form-actions">
+          <div class="actions-end">
+            <button class="btn btn-link" type="button" @click="showCreate = false">取消</button>
             <button class="btn btn-primary" type="submit" :disabled="busy">
               {{ busy ? '处理中…' : '创建' }}
             </button>
-            <button class="btn btn-link" type="button" @click="showCreate = false">取消</button>
           </div>
         </div>
       </form>
@@ -162,15 +177,16 @@ async function remove(gateway: GatewaySummary): Promise<void> {
   <!-- 需求 FR-05.3：令牌只完整显示一次 -->
   <TokenReveal v-if="freshToken" :token="freshToken" @dismiss="freshToken = null" />
 
-  <div class="toolbar">
-    <input v-model="keyword" class="control search" type="search"
-           placeholder="搜索名称、slug 或描述" aria-label="搜索网关">
-    <span class="muted small">
-      共 {{ gateways.length }} 个网关<span v-if="keyword.trim()">，命中 {{ filtered.length }} 个</span>
-    </span>
-  </div>
-
   <div class="card">
+    <!-- 搜索框放进卡片头：它筛的就是下面这张表，浮在卡片外面看着像两件东西 -->
+    <div class="card-header list-head">
+      <input v-model="keyword" class="control search" type="search"
+             placeholder="搜索名称、slug 或描述" aria-label="搜索网关">
+      <span class="muted small">
+        共 {{ gateways.length }} 个网关<span v-if="keyword.trim()">，命中 {{ filtered.length }} 个</span>
+      </span>
+    </div>
+
     <TableSkeleton v-if="loading" />
 
     <div v-else-if="loadFailed" class="empty-state">
@@ -196,6 +212,7 @@ async function remove(gateway: GatewaySummary): Promise<void> {
           <tr>
             <th>名称</th>
             <th>slug</th>
+            <th>MCP 地址</th>
             <th>状态</th>
             <th class="num">子 MCP</th>
             <th class="num">工具</th>
@@ -210,6 +227,11 @@ async function remove(gateway: GatewaySummary): Promise<void> {
               <div v-if="gateway.description" class="small muted">{{ gateway.description }}</div>
             </td>
             <td class="mono small">{{ gateway.slug }}</td>
+            <td class="mono small mcp-url">
+              <!-- 配 Agent 的时候要的就是这个地址，别让人为了复制它点进详情页 -->
+              <span :title="gateway.mcpUrl">{{ gateway.mcpUrl }}</span>
+              <CopyButton :value="gateway.mcpUrl" label="复制 MCP 地址" />
+            </td>
             <td><StatusBadge :status="gateway.status" /></td>
             <td class="num">{{ gateway.downstreamCount }}</td>
             <td class="num">{{ gateway.toolCount }}</td>
@@ -218,6 +240,9 @@ async function remove(gateway: GatewaySummary): Promise<void> {
             </td>
             <td class="actions">
               <div class="btn-row" style="justify-content: flex-end">
+                <RouterLink class="btn btn-sm" :to="`/gateways/${gateway.id}/calls`">
+                  调用记录
+                </RouterLink>
                 <RouterLink class="btn btn-sm" :to="`/gateways/${gateway.id}`">详情</RouterLink>
                 <button class="btn btn-sm btn-danger" type="button" :disabled="busy"
                         @click="remove(gateway)">删除</button>
@@ -226,6 +251,13 @@ async function remove(gateway: GatewaySummary): Promise<void> {
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <div v-if="!loading && !loadFailed && gateways.length > 0" class="card-body list-foot">
+      <span class="small muted">
+        共 {{ totals.gateways }} 个网关 · {{ totals.downstreams }} 个子 MCP ·
+        {{ totals.tools }} 个聚合工具
+      </span>
     </div>
   </div>
 </template>
