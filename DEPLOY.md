@@ -29,6 +29,10 @@
 `MCP_GATEWAY_DOWNSTREAM_INSECURE_SKIP_TLS_VERIFY=true` 关掉下游 TLS 校验 ——
 但先读 SECURITY.md 的「下游 TLS 校验」一节：导 CA 根证书是更好的做法，成本也更低。
 
+
+> **已经部署过旧版本、这次是升级？** 别照着本文从头走一遍 ——
+> 升级有它自己的顺序和坑（新增的必填环境变量、数据库迁移、回滚），见 [UPGRADE.md](UPGRADE.md)。
+
 ## 一、构建
 
 在**能联网的机器**上打包，不要在目标服务器上打：

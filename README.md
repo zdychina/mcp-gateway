@@ -19,6 +19,7 @@ gateway/
   frontend/                         管理前端（Vite + Vue 3 + TypeScript）
   Dockerfile / docker-compose.yml   容器化部署
   DEPLOY.md                         jar 部署（测试/内网服务器）
+  UPGRADE.md                        版本升级指导书
 ```
 
 管理前端是 Vue 单页应用，产物由 Vite 打进 `src/main/resources/static/app/`，随 jar 一起发布。
