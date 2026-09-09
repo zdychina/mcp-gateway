@@ -253,7 +253,12 @@ async function submitImport(): Promise<void> {
             </div>
 
             <div class="field span-all">
-              <label>Headers（可选）</label>
+              <!--
+                这里不能用 <label>：一组键值对没有"那一个"控件可以指向。
+                用 span 顶名字，再用 role="group" + aria-labelledby 把它绑到整组上。
+              -->
+              <span id="new-ds-headers-label" class="field-label">Headers（可选）</span>
+              <div role="group" aria-labelledby="new-ds-headers-label">
               <div v-for="(row, index) in form.headers" :key="index" class="header-row">
                 <input v-model="row.name" class="control mono" placeholder="Authorization"
                        :aria-label="`第 ${index + 1} 个 header 的名称`" :disabled="atLimit">
@@ -268,6 +273,7 @@ async function submitImport(): Promise<void> {
               <div>
                 <button class="btn btn-sm btn-link" type="button" :disabled="atLimit"
                         @click="addHeaderRow">+ 再加一个 header</button>
+              </div>
               </div>
               <span class="hint">凭证会加密后落库，页面上永远只显示遮罩值。</span>
             </div>

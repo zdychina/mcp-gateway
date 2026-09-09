@@ -491,8 +491,29 @@ function callRecordsLink(id: string): string {
           <div class="title">这段时间没有走到任何子 MCP</div>
           <p>未知工具和停用工具的调用没有路由目标，不计入这里。</p>
         </div>
-        <EChart v-else :option="downstreamOption" :height="barHeight(downstreamBars.length)"
-                ariaLabel="子 MCP 调用量条形图" />
+        <!--
+          图表对读屏软件只是一张图，role="img" 的说明只能报出"这是什么图"，报不出数字。
+          趋势图靠"看表格"开关补这条通路；这两张条形图的数值已经标在柱子末端，
+          看得见的人不缺，所以补一张只给读屏的表就够，不必再往界面上加一个开关。
+        -->
+        <template v-else>
+          <EChart :option="downstreamOption" :height="barHeight(downstreamBars.length)"
+                  ariaLabel="子 MCP 调用量条形图，同样的数字在紧随其后的表格里" />
+          <table class="sr-only">
+            <caption>子 MCP 调用量</caption>
+            <thead>
+              <tr><th>子 MCP</th><th>调用量</th><th>失败</th><th>P95 耗时</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in downstreamBars" :key="item.name">
+                <td>{{ item.name }}</td>
+                <td>{{ countLabel(item.calls) }}</td>
+                <td>{{ item.failures }}</td>
+                <td>{{ durationLabel(item.p95DurationMs) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
       </section>
 
       <section class="card">
@@ -547,8 +568,22 @@ function callRecordsLink(id: string): string {
         <div v-else-if="errorBars.length === 0" class="empty-state small">
           <div class="title">这段时间没有失败</div>
         </div>
-        <EChart v-else :option="errorOption" :height="barHeight(errorBars.length)"
-                ariaLabel="错误码分布条形图" />
+        <template v-else>
+          <EChart :option="errorOption" :height="barHeight(errorBars.length)"
+                  ariaLabel="错误码分布条形图，同样的数字在紧随其后的表格里" />
+          <table class="sr-only">
+            <caption>错误码分布</caption>
+            <thead>
+              <tr><th>错误码</th><th>次数</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in errorBars" :key="item.code">
+                <td>{{ item.code }}</td>
+                <td>{{ countLabel(item.count) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
       </section>
     </div>
 

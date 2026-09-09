@@ -32,9 +32,11 @@ const SLUG_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
  *
  * 两个网关的时候这张表只有两行、下面一大片空白 —— 一句汇总不占地方，
  * 又把"这就是全部了"说清楚，比留一条突兀的边界好。
+ *
+ * 这里**不再重复网关总数**：卡片头上已经写着"共 N 个网关"，同一个数字在一张卡片里
+ * 出现两次，读到第二遍要先确认它是不是在说别的东西。底下这行只加头上没有的两个数。
  */
 const totals = computed(() => ({
-  gateways: gateways.value.length,
   downstreams: gateways.value.reduce((sum, item) => sum + item.downstreamCount, 0),
   tools: gateways.value.reduce((sum, item) => sum + item.toolCount, 0)
 }))
@@ -255,8 +257,7 @@ async function remove(gateway: GatewaySummary): Promise<void> {
 
     <div v-if="!loading && !loadFailed && gateways.length > 0" class="card-body list-foot">
       <span class="small muted">
-        共 {{ totals.gateways }} 个网关 · {{ totals.downstreams }} 个子 MCP ·
-        {{ totals.tools }} 个聚合工具
+        合计 {{ totals.downstreams }} 个子 MCP · {{ totals.tools }} 个聚合工具
       </span>
     </div>
   </div>

@@ -189,13 +189,16 @@ async function remove(): Promise<void> {
         </div>
 
         <div class="field span-all">
-          <label>
+          <!-- 同 DownstreamSection：这组不指向单个控件，所以是 span 而不是 label -->
+          <span :id="`ds-headers-label-${downstream.id}`" class="field-label">
             Headers
             <span v-if="Object.keys(downstream.headers).length === 0" class="muted">（未配置）</span>
-          </label>
+          </span>
           <!-- 需求 12.4：只显示 header 名称和遮罩值，真实值不回传前端 -->
-          <div v-for="(masked, name) in downstream.headers" :key="name" class="mono small muted">
-            {{ name }}: {{ masked }}
+          <div role="group" :aria-labelledby="`ds-headers-label-${downstream.id}`">
+            <div v-for="(masked, name) in downstream.headers" :key="name" class="mono small muted">
+              {{ name }}: {{ masked }}
+            </div>
           </div>
           <label class="check headers-toggle">
             <input v-model="replaceHeaders" type="checkbox">
