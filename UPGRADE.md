@@ -3,7 +3,7 @@
 | | |
 | --- | --- |
 | 升级前 | `main` @ `ae80286`（版本号改从 build-info 读，不再写死在代码里） |
-| 升级后 | `dev` @ `238b78a`（文档补上落下的四个提交） |
+| 升级后 | `dev` @ `02d2057`（加升级指导书；功能与 `238b78a` 相同，那之后只多了文档） |
 | 中间跨越 | 9 个提交 |
 | 数据库迁移 | 1 个（`V2__call_record_started_at_index.sql`，纯加索引） |
 | 预计停机 | 一次重启的时间（约 15～30 秒），**无法做到零停机**，原因见 §2.1 |
@@ -112,7 +112,7 @@ openssl rand -base64 18
 
 ```bash
 git fetch origin
-git checkout dev            # 确认在 238b78a
+git checkout dev            # 确认在 02d2057 或更新
 git log -1 --format='%h %s'
 
 mvn -B clean package
