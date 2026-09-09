@@ -25,6 +25,10 @@
 连接上也照发不误。反过来，直接明文 HTTP 暴露时它必须保持 `false`，不然 Cookie 根本不下发、
 登录进不去。
 
+子 MCP 用的是内网自签证书、且拿不到根证书时，可以设
+`MCP_GATEWAY_DOWNSTREAM_INSECURE_SKIP_TLS_VERIFY=true` 关掉下游 TLS 校验 ——
+但先读 SECURITY.md 的「下游 TLS 校验」一节：导 CA 根证书是更好的做法，成本也更低。
+
 ## 一、构建
 
 在**能联网的机器**上打包，不要在目标服务器上打：

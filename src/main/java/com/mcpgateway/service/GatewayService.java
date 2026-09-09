@@ -223,7 +223,9 @@ public class GatewayService {
 
         GatewayStatus status = GatewayStatusCalculator.calculate(owned);
         return new GatewayDetailResponse(gateway.id(), gateway.name(), gateway.slug(), gateway.description(),
-                status, mcpUrl(gateway.slug()), downstreamViews, gateway.createdAt(), gateway.updatedAt());
+                status, mcpUrl(gateway.slug()), downstreamViews,
+                this.properties.getDownstream().isInsecureSkipTlsVerify(),
+                gateway.createdAt(), gateway.updatedAt());
     }
 
     private static String normalizeDescription(String description) {

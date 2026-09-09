@@ -144,6 +144,21 @@ public class GatewayProperties {
         @Min(1024)
         private int maxResponseSize = 1024 * 1024;
 
+        /**
+         * 跳过下游 TLS 证书与主机名校验。**默认关闭，且必须保持默认关闭。**
+         *
+         * 打开之后，网关连接子 MCP 时不再验证对方身份 —— 任何能在网关和子 MCP 之间
+         * 插一脚的人（ARP 欺骗、DNS 劫持、同网段被攻陷的主机）都能拿到明文的下游凭证。
+         * 这些凭证在库里是 AES-GCM 加密的、在日志里是遮罩的，打开这个开关等于
+         * 在传输环节把那些功夫抵消掉，所以名字里带 insecure，不要包装成中性词。
+         *
+         * 正当用途只有一种：内网自签证书 / 私有 CA，且拿不到根证书。
+         * 能拿到根证书就应该导进 JVM 信任库，那条路不牺牲任何东西。
+         *
+         * 由 MCP_GATEWAY_DOWNSTREAM_INSECURE_SKIP_TLS_VERIFY 控制。
+         */
+        private boolean insecureSkipTlsVerify = false;
+
         public Duration getCallTimeout() {
             return this.callTimeout;
         }
@@ -166,6 +181,14 @@ public class GatewayProperties {
 
         public void setMaxResponseSize(int maxResponseSize) {
             this.maxResponseSize = maxResponseSize;
+        }
+
+        public boolean isInsecureSkipTlsVerify() {
+            return this.insecureSkipTlsVerify;
+        }
+
+        public void setInsecureSkipTlsVerify(boolean insecureSkipTlsVerify) {
+            this.insecureSkipTlsVerify = insecureSkipTlsVerify;
         }
     }
 

@@ -222,6 +222,18 @@ async function submitImport(): Promise<void> {
     </div>
     <div class="card-body stack">
 
+      <!--
+        部署把下游 TLS 校验关掉时，这条提示常驻。
+        用 .notice 而不是 .alert：它说的是"这个部署现在是什么状态"，不是"刚刚发生了什么"，
+        不会自己消失，也不该被 AlertStack 的关闭按钮收掉。
+      -->
+      <p v-if="gateway.insecureDownstreamTls" class="notice notice-danger">
+        <strong>下游 TLS 校验已关闭。</strong>
+        子 MCP 的证书和主机名都不再验证，下面配置的凭证会在无法确认对方身份的连接上传输。
+        这由部署时的 <code>MCP_GATEWAY_DOWNSTREAM_INSECURE_SKIP_TLS_VERIFY</code> 决定，
+        界面上改不了。
+      </p>
+
       <form id="import-form" @submit.prevent="submitImport">
         <div class="add-head">
           <strong class="add-title">新增子 MCP</strong>

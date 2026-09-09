@@ -14,7 +14,7 @@
 | 12.4 | 配置查询接口只返回 header 名称及遮罩值 | ✅ | `DownstreamHeaderCodec.maskedView`，**所有** header 值一律遮罩，不做敏感名白名单 |
 | 12.5 | 日志、调用记录、异常过滤凭证 | ✅ | `SensitiveDataMasker.describeForLog`；`SecurityInvariantsTest.headersAreNeverLoggedRaw` 扫描所有 `log.*` 调用 |
 | 12.6 | 校验 Origin；默认只监听 localhost | ✅ | `OriginValidator` 挂在 SDK transport 的 `securityValidator` 上；`server.address` 默认 `127.0.0.1`（实测确认） |
-| 12.7 | 子 MCP URL 只允许 http/https，禁止 user-info；重定向后重新校验 | ✅（更严格） | `DownstreamUrlValidator`。重定向一项采取了更保守的做法：下游客户端**完全不跟随重定向** |
+| 12.7 | 子 MCP URL 只允许 http/https，禁止 user-info；重定向后重新校验 | ✅（更严格） | `DownstreamUrlValidator`。重定向一项采取了更保守的做法：下游客户端**完全不跟随重定向**。TLS 证书按 JVM 信任库校验，可被 `MCP_GATEWAY_DOWNSTREAM_INSECURE_SKIP_TLS_VERIFY` 显式关掉，见下方专节 |
 | 12.8 | 限制管理端的访问 | ✅ | 单账号会话登录，凭证只来自环境变量。`SecurityConfig` 两条过滤器链；`ApiAuthorizationInvariantsTest` 逐个端点实打实地探一遍，`SecurityInvariantsTest` 守住口令无默认值、Cookie 加固、不启用 formLogin、只有 Agent 链能关 CSRF |
 | 12.9 | 请求体与下游响应体大小上限 | ✅ | `transport.maxRequestSize` 与客户端 `maxResponseSize`，默认各 1 MiB，可配 |
 
@@ -40,6 +40,44 @@
   就撤掉前一道，`docker-compose.yml` 里端口仍只发布到宿主机回环。
 - actuator 只放开 `/actuator/health`，且 `show-details: never`。其余路径落在
   `SecurityConfig` 末尾的 `anyRequest().denyAll()` 上，返回 401。
+
+## 下游 TLS 校验
+
+默认**开着**：连接子 MCP 时按 JVM 信任库校验证书链和主机名，不通过就拒绝连接，
+报 `DOWNSTREAM_INIT_FAILED`，真实原因（如 `PKIX path building failed`）在服务端日志里。
+
+| 变量 | 必填 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `MCP_GATEWAY_DOWNSTREAM_INSECURE_SKIP_TLS_VERIFY` | 否 | `false` | 设为 `true` 时**同时**关掉证书链校验和主机名校验 |
+
+**打开它意味着什么**：网关往子 MCP 发的是解密后的真实凭证。这些凭证在库里是 AES-GCM
+加密的、在日志里是遮罩的，但传输环节一旦不验证对方身份，任何能在网关和子 MCP 之间插一脚的人
+（ARP 欺骗、DNS 劫持、同网段被攻陷的主机）都能拿到明文。前面那些功夫在这一步被抵消。
+
+**先试这两条，它们不牺牲任何东西**：
+
+1. 把对方的 CA 根证书导进 JVM 信任库（自签就直接导那张证书，效果等同证书固定）：
+
+   ```bash
+   cp "$JAVA_HOME/lib/security/cacerts" truststore.p12   # 先复制一份，别改原件
+   keytool -importcert -noprompt -alias downstream-ca -file downstream-ca.crt      -keystore truststore.p12 -storepass changeit
+   ```
+
+   启动时 `-Djavax.net.ssl.trustStore=... -Djavax.net.ssl.trustStorePassword=...`
+   （容器里走 `JAVA_OPTS`，证书只读挂载进去）。
+   注意这个参数是**全局替换**而非追加，所以务必基于 `cacerts` 的副本来做，
+   否则所有走公网 HTTPS 的下游会一起挂掉。
+
+2. 如果证书是公共 CA 签的却仍然报 `path building failed`，多半是**服务端漏发中间证书**
+   （浏览器能靠 AIA 补全，JDK 不会）。让对方补全链，比在网关这边打补丁干净。
+
+只有在"内网自签证书 + 拿不到根证书"这一种情况下才用这个开关。打开后：
+
+- 启动日志里有一条 WARN（`DownstreamClientFactory.warnIfTlsVerificationDisabled`）
+- 网关详情页的「子 MCP 配置」卡片上有一条常驻红色提示，配子 MCP 的人一定看得见
+- `SecurityInvariantsTest` 钉住默认值必须是 `false`，也钉住实现必须**两样都关**
+  （只换 TrustManager 而不清掉 `endpointIdentificationAlgorithm` 是个残废实现，
+  自签能过但主机名对不上照样失败，很容易被误判成"开关没生效"）
 - 登录失败按来源 IP 限速：连续 5 次后锁 5 分钟，**锁定期间不比对口令**（否则能通过响应时间
   区分"锁着且口令对"和"锁着且口令不对"）。状态在内存里，重启清空。
   注意反向代理后面所有请求的来源 IP 都是代理，此时限速会退化成全局的 ——

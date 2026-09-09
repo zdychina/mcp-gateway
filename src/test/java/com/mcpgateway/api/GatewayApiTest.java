@@ -65,6 +65,17 @@ class GatewayApiTest extends AbstractApiTest {
     }
 
     @Test
+    @DisplayName("需求 12.7：详情里带出下游 TLS 校验的开关状态，默认是没关掉")
+    void detailReportsDownstreamTlsPosture() throws Exception {
+        String gatewayId = createGateway(uniqueSlug("tls")).at("/data/gateway/id").asText();
+
+        this.mockMvc.perform(get("/api/gateways/" + gatewayId))
+                .andExpect(status().isOk())
+                // 界面上那条常驻警告靠它渲染，默认必须是 false —— 没关校验就不该有任何噪音
+                .andExpect(jsonPath("$.data.insecureDownstreamTls").value(false));
+    }
+
+    @Test
     @DisplayName("需求 6.1.2：slug 重复返回 DUPLICATE_GATEWAY_SLUG")
     void rejectsDuplicateSlug() throws Exception {
         String slug = uniqueSlug("dup");

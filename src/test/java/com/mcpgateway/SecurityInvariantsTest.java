@@ -194,6 +194,44 @@ class SecurityInvariantsTest {
     }
 
     @Test
+    @DisplayName("需求 12.7：下游 TLS 校验默认开着，关掉它必须由部署显式写出来")
+    void downstreamTlsVerificationIsOnByDefault() throws IOException {
+        String applicationYml = Files.readString(MAIN_RESOURCES.resolve("application.yml"),
+                StandardCharsets.UTF_8);
+
+        // 默认值必须是 false（= 不跳过校验），且只能由环境变量翻开。
+        assertThat(applicationYml)
+                .as("跳过下游 TLS 校验的默认值")
+                .contains("insecure-skip-tls-verify: ${MCP_GATEWAY_DOWNSTREAM_INSECURE_SKIP_TLS_VERIFY:false}");
+
+        String properties = Files.readString(
+                MAIN_JAVA.resolve("com/mcpgateway/config/GatewayProperties.java"), StandardCharsets.UTF_8);
+
+        assertThat(properties)
+                .as("Java 侧的字段默认值")
+                .contains("private boolean insecureSkipTlsVerify = false;");
+
+        /*
+         * 名字里必须留着 insecure。
+         *
+         * 这条看着像洁癖，但它守的是一件具体的事：配置项的名字是运维唯一会读的说明书。
+         * 叫 tls.verify: false 的话，抄配置的人看不出自己在放弃什么。
+         */
+        assertThat(properties).contains("insecureSkipTlsVerify");
+    }
+
+    @Test
+    @DisplayName("需求 12.7：跳过校验时证书链和主机名两样都得关，只关一样是残废实现")
+    void insecureTlsDisablesBothTrustAndHostnameChecks() throws IOException {
+        String factory = Files.readString(
+                MAIN_JAVA.resolve("com/mcpgateway/downstream/DownstreamClientFactory.java"),
+                StandardCharsets.UTF_8);
+
+        assertThat(factory).contains("sslContext(trustAllContext())");
+        assertThat(factory).contains("setEndpointIdentificationAlgorithm(null)");
+    }
+
+    @Test
     @DisplayName("需求 12.8：actuator 默认只放开 health")
     void actuatorExposureIsMinimal() throws IOException {
         String applicationYml = Files.readString(MAIN_RESOURCES.resolve("application.yml"),

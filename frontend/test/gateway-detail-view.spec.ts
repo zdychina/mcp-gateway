@@ -76,6 +76,7 @@ function detail(overrides: Partial<GatewayDetail> = {}): GatewayDetail {
     status: 'READY',
     mcpUrl: 'http://127.0.0.1:8080/mcp/kb-gateway',
     downstreams: [downstream()],
+    insecureDownstreamTls: false,
     createdAt: '2026-08-30T10:00:00Z',
     updatedAt: '2026-08-31T09:30:00Z',
     ...overrides
@@ -161,6 +162,34 @@ describe('需求 10.2：详情页四段', () => {
 
     expect(view.text()).toContain('没有找到这个网关')
     expect(view.find('a[href="/ui/gateways"]').exists()).toBe(true)
+  })
+})
+
+describe('下游 TLS 校验被关掉时的提示', () => {
+  it('默认不显示 —— 校验开着的时候不该有任何噪音', async () => {
+    const view = await render()
+
+    expect(view.find('.notice-danger').exists()).toBe(false)
+    expect(view.text()).not.toContain('下游 TLS 校验已关闭')
+  })
+
+  it('关掉之后常驻提示，并说清凭证会怎么传、去哪里改', async () => {
+    gatewayApi.detail.mockResolvedValue(detail({ insecureDownstreamTls: true }))
+    const view = await render()
+
+    const notice = view.find('.notice-danger')
+    expect(notice.exists()).toBe(true)
+    expect(notice.text()).toContain('下游 TLS 校验已关闭')
+    // 光说"关了"没用，得说清后果和改的地方
+    expect(notice.text()).toContain('凭证')
+    expect(notice.text()).toContain('MCP_GATEWAY_DOWNSTREAM_INSECURE_SKIP_TLS_VERIFY')
+  })
+
+  it('提示不进全局提示栈 —— 它是常驻状态，不是刚发生的事', async () => {
+    gatewayApi.detail.mockResolvedValue(detail({ insecureDownstreamTls: true }))
+    const view = await render()
+
+    expect(view.findAll('.alerts .alert')).toHaveLength(0)
   })
 })
 

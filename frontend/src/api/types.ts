@@ -94,6 +94,11 @@ export interface GatewayDetail {
   status: GatewayStatus
   mcpUrl: string
   downstreams: DownstreamMcp[]
+  /**
+   * 部署是否关掉了下游 TLS 校验（MCP_GATEWAY_DOWNSTREAM_INSECURE_SKIP_TLS_VERIFY）。
+   * 部署级开关，和具体网关无关；下发到这里是因为配子 MCP 的人必须看得见。
+   */
+  insecureDownstreamTls: boolean
   createdAt: string
   updatedAt: string
 }

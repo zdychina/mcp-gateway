@@ -75,6 +75,9 @@ mcp-gateway:
     connect-timeout: 10s
     # 需求 12.9：下游响应体大小上限，默认 1 MiB。
     max-response-size: 1048576
+    # 跳过下游 TLS 证书与主机名校验。默认关闭，只有内网自签证书且拿不到根证书时才打开 ——
+    # 打开之后下游凭证会在一条无法验证对方身份的连接上传输。详见 SECURITY.md。
+    insecure-skip-tls-verify: ${MCP_GATEWAY_DOWNSTREAM_INSECURE_SKIP_TLS_VERIFY:false}
 
   server:
     # 需求 12.9：Agent 请求体大小上限，默认 1 MiB。

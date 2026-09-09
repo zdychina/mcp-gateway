@@ -18,6 +18,10 @@ services:
       # 不能用容器内部的 127.0.0.1（需求 FR-05.1）。
       MCP_GATEWAY_BASE_URL: ${MCP_GATEWAY_BASE_URL:-http://127.0.0.1:8080}
       MCP_GATEWAY_ALLOWED_ORIGINS: ${MCP_GATEWAY_ALLOWED_ORIGINS:-}
+      # 关掉子 MCP 的 TLS 证书与主机名校验。默认 false，保持这样。
+      # 只有"内网自签证书 + 拿不到根证书"这一种情况才设 true —— 打开之后下游凭证会在
+      # 无法验证对方身份的连接上传输。更好的做法是把 CA 导进信任库，见 SECURITY.md。
+      MCP_GATEWAY_DOWNSTREAM_INSECURE_SKIP_TLS_VERIFY: ${MCP_GATEWAY_DOWNSTREAM_INSECURE_SKIP_TLS_VERIFY:-false}
 
     ports:
       # 只发布到本机回环。管理端已有登录，改成内网地址不再等于把它完全交出去，
