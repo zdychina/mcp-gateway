@@ -6,7 +6,8 @@
 
 当前进度：W1（工程骨架）、W2（数据层与密钥）、W3（网关与子 MCP 配置 API）、W4（下游客户端与同步引擎）、W5（对外 MCP Server 与调用路由）、W6（调用打点）、W7（管理前端）、W8（安全收口、验收测试与容器化）完成。MVP 功能范围已全部实现。
 
-MVP 之后：管理端加了登录（单账号、会话 Cookie），见下面的[管理端登录](#管理端登录)一节。
+MVP 之后仍在持续加功能。**增量功能怎么用一律见 [USAGE.md](USAGE.md)，本文档只记其中的设计取舍**
+（例如[管理端登录](#管理端登录)一节）—— 在这里维护一份功能流水账，只会和 USAGE 越漂越远。
 
 目录布局：
 
@@ -58,6 +59,7 @@ PowerShell 下：
 | `MCP_GATEWAY_PORT` | 否 | `8080` | |
 | `MCP_GATEWAY_DB_PATH` | 否 | `./data/mcp-gateway` | H2 文件库路径。库里含知识库返回内容，需按部署要求保护（FR-06.4） |
 | `MCP_GATEWAY_ALLOWED_ORIGINS` | 否 | 空 | 逗号分隔。内网部署时显式配置允许来源 |
+| `MCP_GATEWAY_DOWNSTREAM_INSECURE_SKIP_TLS_VERIFY` | 否 | `false` | 关掉子 MCP 的证书链与主机名校验。只为"内网自签证书且拿不到根证书"存在，见 [SECURITY.md](SECURITY.md#下游-tls-校验) |
 
 ## 构建与测试
 
@@ -194,8 +196,10 @@ docker compose up -d --build
 | `POST` | `/api/gateways/{id}/access-token/rotate` | 已实现 |
 | `POST` | `/api/gateways/{id}/mcp-servers/{serverId}/sync` | 已实现，失败也返回 200，细节在 body |
 | `PATCH` | `/api/gateways/{id}/tools/{toolId}` | 已实现，PATCH 语义 |
-| `GET` | `/api/gateways/{id}/call-records` | 已实现，分页与筛选 |
+| `GET` | `/api/gateways/{id}/call-records` | 已实现，分页与筛选；`extract` 可点名要正文里的几个字段 |
 | `GET` | `/api/gateways/{id}/call-records/{callId}` | 已实现，含入参与返回正文 |
+| `GET` | `/api/gateways/{id}/call-records/export` | 已实现，按当前筛选导出 `.xlsx`，有行数上限 |
+| `GET` | `/api/stats` | 已实现，一个时间窗内的聚合数字，总览页的后端 |
 
 两处 PATCH 语义需要注意：
 
@@ -206,20 +210,26 @@ docker compose up -d --build
 ## 管理界面
 
 浏览器打开 `{baseUrl}/` 即可；未登录会先落在 `/ui/login`，登录后到网关列表页。
-前两个页面对应需求 §10，第三个是 FR-06.5 的查询界面：
+列表页和详情页对应需求 §10，调用记录页是 FR-06.5 的查询界面，总览页是 MVP 之后加的：
 
-- **列表页** `/ui/gateways`：名称、slug、状态、子 MCP 数量、工具数量、更新时间，以及创建和删除。
 - **登录页** `/ui/login`：未登录时所有页面都会被路由守卫送到这里，登录后回到原本要去的地址。
+- **总览页** `/ui/dashboard`：一个时间窗内的调用量趋势，以及按网关 / 子 MCP / 工具 / 错误码的分布。
+  全部图表来自同一个接口的同一份数据，避免"总量对得上、分组对不上"的中间态。
+- **列表页** `/ui/gateways`：名称、slug、MCP 地址、状态、子 MCP 数量、工具数量、更新时间，以及创建和删除。
 - **详情页** `/ui/gateways/{id}`：基本信息 / 子 MCP 配置 / 聚合工具 / Agent 接入 四段。
-- **调用记录页** `/ui/gateways/{id}/calls`：按工具、子 MCP、状态、trace_id 和时间筛选，展开看入参与返回。
+- **调用记录页** `/ui/gateways/{id}/calls`：按工具、子 MCP、状态、trace_id 和时间筛选，展开看入参与返回；
+  列可配置（含按 JSON Pointer 抽取正文字段），可按当前筛选导出 Excel。
+
+各页面怎么用见 [USAGE.md 第 4 节](USAGE.md#4-管理界面操作)。
 
 ### 实现方式：Vite + Vue 3 + TypeScript
 
-前端在 `frontend/`，四个页面同属一个 Vue 单页应用：
+前端在 `frontend/`，五个页面同属一个 Vue 单页应用：
 
 | 页面 | 组件 |
 | --- | --- |
 | 登录页 `/ui/login` | `frontend/src/views/LoginView.vue` |
+| 总览页 `/ui/dashboard` | `frontend/src/views/DashboardView.vue`（路由级懒加载，ECharts 单独成块） |
 | 列表页 `/ui/gateways` | `frontend/src/views/GatewayListView.vue` |
 | 详情页 `/ui/gateways/{id}` | `frontend/src/views/GatewayDetailView.vue` |
 | 调用记录页 `/ui/gateways/{id}/calls` | `frontend/src/views/CallRecordsView.vue` |
@@ -338,10 +348,11 @@ docker compose up -d --build
 | --- | --- | --- |
 | `GET` | `/api/gateways/{id}/call-records` | 分页列表，支持按工具名、子 MCP、状态、trace_id、时间范围筛选 |
 | `GET` | `/api/gateways/{id}/call-records/{callId}` | 单条完整内容，**含入参和返回正文** |
+| `GET` | `/api/gateways/{id}/call-records/export` | 按当前筛选导出 `.xlsx`，列由调用方指定 |
 
-界面在 `/ui/gateways/{id}/calls`，从详情页进去。
+界面在 `/ui/gateways/{id}/calls`，从详情页、网关列表和总览页三处都能进去。
 
-三处刻意的取舍：
+四处刻意的取舍：
 
 - **列表不返回 `request_json` / `response_json`。** 那两列按 FR-06.4 原样保存不截断，
   单条就可能接近 1 MiB，装的是知识库正文。列表一次几十条把它们带上，等于让一次请求
@@ -358,6 +369,12 @@ docker compose up -d --build
 以为"筛出来就这些"，而实际上根本没筛。`size` 超过 100 则收敛到 100，响应里的 `size` 字段
 说明实际用了多少。
 
+- **正文只有三个出口，各自都有上界。** 取单条不受限，但一次只能拿一条；列表侧的
+  `extract` 按 JSON Pointer 点名要字段，最多 4 个、每个 200 字符，且超过 64 KB 的正文
+  根本不参与解析；导出接口是其中最大的一个口子（最多 5000 行，超出即截断并在
+  `X-Export-Truncated` 里说明），但它同样不返回完整正文。三者的额度算法见
+  [SECURITY.md](SECURITY.md)。
+
 **调用记录目前没有清理或归档策略**，只在删除网关时级联删除。长期运行需要自行处理。
 
 ## 同步行为
@@ -371,5 +388,10 @@ docker compose up -d --build
 - 聚合工具名不合法或超过 128 字符时整次同步失败，不静默截断（需求 6.3.5）。
 - 出于安全考虑，下游客户端**不跟随 HTTP 重定向**。需求 12.7 要求重定向后重新校验协议，
   MVP 采取更保守的做法，避免一个 302 把请求连同凭证带去未经校验的主机。
+  这也意味着下游配了 `http://` 而服务端强制跳 https 时会直接失败 —— 得在配置里写 https 地址。
+- 下游 TLS 证书按 JVM 信任库校验，握手失败会报 `DOWNSTREAM_INIT_FAILED`，
+  真实原因（如 `PKIX path building failed`）只进服务端日志、不进 API 响应。
+  内网自签证书拿不到根证书时可以用 `MCP_GATEWAY_DOWNSTREAM_INSECURE_SKIP_TLS_VERIFY`
+  关掉校验，代价和更好的替代做法见 [SECURITY.md](SECURITY.md#下游-tls-校验)。
 
 数据库迁移在 `src/main/resources/db/migration/`。
