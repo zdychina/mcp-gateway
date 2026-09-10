@@ -11,7 +11,7 @@
 `MCP_GATEWAY_BIND_ADDRESS` 默认仍是 `127.0.0.1`（需求 12.6 / 4.3）。下面的部署要把它改成
 `0.0.0.0`：凡是能访问到这个端口的人，就都到了登录页前面，此后挡着他们的只有那一个口令。
 **仍然建议放在可信内网，并用安全组 / iptables 限制来源 IP** —— 纵深防御不因为多了一道就撤掉
-前一道。口令至少 12 位，短于这个长度网关直接拒绝启动。
+前一道。口令至少 8 位，短于这个长度网关直接拒绝启动。
 
 三个平面的保护级别不同，别混为一谈：
 
@@ -79,7 +79,7 @@ sudo chmod 600 /opt/mcp-gateway/master.key
 > 都换一把新钥匙，此前存的所有子 MCP 配置会全部解不开。备份数据库时必须连同主密钥一起备份，
 > 缺了任何一半都恢复不出来。
 
-管理员口令同样只能来自环境变量，缺失或短于 12 位时**网关拒绝启动**：
+管理员口令同样只能来自环境变量，缺失或短于 8 位时**网关拒绝启动**：
 
 ```bash
 openssl rand -base64 18   # 生成一个够长的随机口令
@@ -144,7 +144,7 @@ systemd 虽然有 `WorkingDirectory`，仍然建议显式写绝对路径。
 ```
 MCP_GATEWAY_MASTER_KEY=<master.key 里那串 base64>
 MCP_GATEWAY_ADMIN_USERNAME=admin
-MCP_GATEWAY_ADMIN_PASSWORD=<至少 12 位的口令>
+MCP_GATEWAY_ADMIN_PASSWORD=<至少 8 位的口令>
 MCP_GATEWAY_COOKIE_SECURE=false
 MCP_GATEWAY_BIND_ADDRESS=0.0.0.0
 MCP_GATEWAY_PORT=8080
@@ -253,7 +253,7 @@ H2 是文件库且以 `AUTO_SERVER=FALSE` 打开（单机单进程，需求 14�
 | 本机 `curl` 通，外部连不上 | `MCP_GATEWAY_BIND_ADDRESS` 没设成 `0.0.0.0`；或防火墙/安全组没放行 |
 | 网关正常，但 Agent 连不上 | `MCP_GATEWAY_BASE_URL` 填的地址 Agent 访问不到（写成了 `127.0.0.1` 或 `0.0.0.0`） |
 | 启动失败，提示 master key | 主密钥缺失，或解码后不是 32 字节 |
-| 启动失败，提示 ADMIN_PASSWORD | 管理员口令缺失，或短于 12 位 |
+| 启动失败，提示 ADMIN_PASSWORD | 管理员口令缺失，或短于 8 位 |
 | 登录页填对了口令却一直退回登录页 | 反代做了 TLS 但没设 `MCP_GATEWAY_COOKIE_SECURE=true`；或明文 HTTP 却设成了 `true`（Cookie 不下发）|
 | 登录返回 `TOO_MANY_ATTEMPTS` | 该来源连续失败 5 次被锁 5 分钟。反代后面所有请求来源 IP 相同，会退化成全局限速 |
 | 管理界面操作返回 `FORBIDDEN` | CSRF 令牌过期。刷新页面重取即可 |

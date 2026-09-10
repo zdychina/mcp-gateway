@@ -52,7 +52,7 @@ PowerShell 下：
 | 变量 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `MCP_GATEWAY_MASTER_KEY` | 是 | 无 | Base64 编码的 32 字节 AES 主密钥。缺失或长度不对时启动失败 |
-| `MCP_GATEWAY_ADMIN_PASSWORD` | 是 | 无 | 管理端登录口令。缺失或短于 12 位时启动失败（需求 12.8） |
+| `MCP_GATEWAY_ADMIN_PASSWORD` | 是 | 无 | 管理端登录口令。缺失或短于 8 位时启动失败（需求 12.8） |
 | `MCP_GATEWAY_ADMIN_USERNAME` | 否 | `admin` | 管理端登录用户名 |
 | `MCP_GATEWAY_BASE_URL` | 建议 | `http://127.0.0.1:8080` | Agent 接入 JSON 里的地址，只能来自配置，不从请求头拼接（FR-05.1） |
 | `MCP_GATEWAY_BIND_ADDRESS` | 否 | `127.0.0.1` | 默认只监听 localhost（需求 12.6 / 4.3）。有了登录之后绑内网地址是可选项，但默认值不变 |
@@ -140,7 +140,7 @@ git tag v1.0.0 && git push origin v1.0.0
 
 ```bash
 export MCP_GATEWAY_MASTER_KEY=$(openssl rand -base64 32)
-export MCP_GATEWAY_ADMIN_PASSWORD='<至少 12 位的口令>'
+export MCP_GATEWAY_ADMIN_PASSWORD='<至少 8 位的口令>'
 export MCP_GATEWAY_BASE_URL=http://<Agent 能访问到的地址>:8080
 docker compose up -d --build
 ```

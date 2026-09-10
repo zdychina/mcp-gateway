@@ -8,7 +8,7 @@ services:
     environment:
       # 必填，没有默认值。生成方式：openssl rand -base64 32
       MCP_GATEWAY_MASTER_KEY: ${MCP_GATEWAY_MASTER_KEY:?请先设置 MCP_GATEWAY_MASTER_KEY}
-      # 必填，没有默认值，至少 12 位。管理端登录口令（需求 12.8）。
+      # 必填，没有默认值，至少 8 位。管理端登录口令（需求 12.8）。
       MCP_GATEWAY_ADMIN_PASSWORD: ${MCP_GATEWAY_ADMIN_PASSWORD:?请先设置 MCP_GATEWAY_ADMIN_PASSWORD}
       MCP_GATEWAY_ADMIN_USERNAME: ${MCP_GATEWAY_ADMIN_USERNAME:-admin}
       # 会话 Cookie 是否只在 HTTPS 上下发。下面的端口发布是明文 HTTP，所以默认 false；

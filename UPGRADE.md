@@ -8,7 +8,7 @@
 | 数据库迁移 | 1 个（`V2__call_record_started_at_index.sql`，纯加索引） |
 | 预计停机 | 一次重启的时间（约 15～30 秒），**无法做到零停机**，原因见 §2.1 |
 
-**一句话：必须新增一个环境变量 `MCP_GATEWAY_ADMIN_PASSWORD`（≥12 位），不设应用起不来。
+**一句话：必须新增一个环境变量 `MCP_GATEWAY_ADMIN_PASSWORD`（≥8 位），不设应用起不来。
 其余全部向后兼容 —— Agent 不受影响，令牌不用换，数据不用迁。**
 
 ---
@@ -31,7 +31,7 @@
 
 | 变量 | 必填 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `MCP_GATEWAY_ADMIN_PASSWORD` | **是** | 无 | 管理端登录口令。缺失或**短于 12 位时应用启动失败** |
+| `MCP_GATEWAY_ADMIN_PASSWORD` | **是** | 无 | 管理端登录口令。缺失或**短于 8 位时应用启动失败** |
 | `MCP_GATEWAY_ADMIN_USERNAME` | 否 | `admin` | 管理端登录用户名 |
 | `MCP_GATEWAY_COOKIE_SECURE` | 否 | `false` | **做了 TLS 反代的必须设为 `true`**，否则会话 Cookie 会在明文连接上也照发；反过来明文 HTTP 部署设成 `true` 会导致 Cookie 不下发、登录不进去 |
 | `MCP_GATEWAY_DOWNSTREAM_INSECURE_SKIP_TLS_VERIFY` | 否 | `false` | 关掉子 MCP 的 TLS 校验。**保持默认** —— 只有内网自签证书且拿不到根证书时才考虑，见 [SECURITY.md](SECURITY.md#下游-tls-校验) |
@@ -69,7 +69,7 @@
 - **改口令要重启**，界面上没有改密入口，也没有找回密码通道
 - 会话存在服务端内存里，**以后每次重启都会全员掉线**（闲置 30 分钟也会超时）
 
-准备口令时注意：不短于 12 位，且只能来自环境变量。
+准备口令时注意：不短于 8 位，且只能来自环境变量。
 
 ### 2.4 回滚是安全的（已实测）
 
@@ -99,7 +99,7 @@ cp /opt/mcp-gateway/data/mcp-gateway.mv.db \
 # 二、留一份当前 jar，回滚时要用
 cp /opt/mcp-gateway/mcp-gateway.jar /opt/mcp-gateway/mcp-gateway.jar.main-ae80286
 
-# 三、想一个管理端口令（≥12 位），先存到密码管理器里
+# 三、想一个管理端口令（≥8 位），先存到密码管理器里
 openssl rand -base64 18
 ```
 
@@ -270,8 +270,8 @@ Docker：`docker compose down && git checkout main && docker compose build && do
 **启动即失败，日志里是 `MCP_GATEWAY_ADMIN_PASSWORD is not configured`**
 口令没设，或者设了但没传进进程。systemd 要确认写在 `Environment=` 或 `EnvironmentFile=` 里。
 
-**启动即失败，`must be at least 12 characters`**
-口令短于 12 位。异常信息里不会回显你设的值 —— 启动失败的日志经常被整段贴进工单。
+**启动即失败，`must be at least 8 characters`**
+口令短于 8 位。异常信息里不会回显你设的值 —— 启动失败的日志经常被整段贴进工单。
 
 **登录页填对口令却一直退回登录页**
 `MCP_GATEWAY_COOKIE_SECURE` 和实际协议对不上。TLS 反代后面要 `true`，明文 HTTP 要 `false`。

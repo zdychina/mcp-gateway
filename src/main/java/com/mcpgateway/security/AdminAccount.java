@@ -22,11 +22,11 @@ public class AdminAccount {
     /**
      * 口令长度下限。
      *
-     * 12 位不是随口定的：管理端有了登录之后就允许绑到内网地址，等于把登录接口暴露给
+     * 8 位是下限，不是建议值：管理端有了登录之后就允许绑到内网地址，等于把登录接口暴露给
      * 一个可以持续尝试的网络。BCrypt 加登录限速能把在线爆破压到很慢，但前提是口令
-     * 本身不在字典的前几万条里。
+     * 本身不在字典的前几万条里 —— 部署时仍然应该用更长的随机口令。
      */
-    private static final int MIN_PASSWORD_LENGTH = 12;
+    private static final int MIN_PASSWORD_LENGTH = 8;
 
     private final String username;
 

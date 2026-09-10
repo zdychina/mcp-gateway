@@ -28,7 +28,7 @@
 | 变量 | 必填 | 默认 | 说明 |
 | --- | --- | --- | --- |
 | `MCP_GATEWAY_ADMIN_USERNAME` | 否 | `admin` | |
-| `MCP_GATEWAY_ADMIN_PASSWORD` | **是** | 无 | 缺失或短于 12 位时**启动失败**（`AdminAccount`） |
+| `MCP_GATEWAY_ADMIN_PASSWORD` | **是** | 无 | 缺失或短于 8 位时**启动失败**（`AdminAccount`） |
 | `MCP_GATEWAY_COOKIE_SECURE` | 否 | `false` | 放在做了 TLS 的反向代理后面时**必须**设为 `true` |
 
 与主密钥同样的取舍：没有默认值、没有首启向导、没有找回密码通道，代价是**改口令要重启**。

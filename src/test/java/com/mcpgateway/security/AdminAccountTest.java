@@ -84,4 +84,15 @@ class AdminAccountTest {
 
         assertThat(account.username()).isEqualTo("operator");
     }
+
+    @Test
+    @DisplayName("长度下限就在 8 位这条线上 —— 7 位拒绝，8 位放行")
+    void enforcesTheLengthBoundaryAtEight() {
+        assertThatThrownBy(() -> new AdminAccount(propertiesWith("admin", "1234567"), ENCODER))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("at least");
+
+        assertThat(new AdminAccount(propertiesWith("admin", "12345678"), ENCODER).username())
+                .isEqualTo("admin");
+    }
 }

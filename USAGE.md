@@ -77,7 +77,7 @@ openssl rand -base64 32
 
 ### 2.2b 想一个管理端口令
 
-管理界面需要登录（需求 12.8）。口令**至少 12 位**，缺失或过短时网关拒绝启动：
+管理界面需要登录（需求 12.8）。口令**至少 8 位**，缺失或过短时网关拒绝启动：
 
 ```bash
 openssl rand -base64 18
@@ -917,7 +917,7 @@ JSON-RPC `code` 映射：`TOOL_NOT_FOUND` / `TOOL_DISABLED` / `INVALID_TOOL_ARGU
 | 变量 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `MCP_GATEWAY_MASTER_KEY` | **是** | 无 | Base64 编码的 32 字节 AES 主密钥。缺失、不是合法 Base64 或长度不对时**启动失败** |
-| `MCP_GATEWAY_ADMIN_PASSWORD` | **是** | 无 | 管理端登录口令。缺失或**短于 12 位**时**启动失败** |
+| `MCP_GATEWAY_ADMIN_PASSWORD` | **是** | 无 | 管理端登录口令。缺失或**短于 8 位**时**启动失败** |
 | `MCP_GATEWAY_ADMIN_USERNAME` | 否 | `admin` | 管理端登录用户名 |
 | `MCP_GATEWAY_COOKIE_SECURE` | 否 | `false` | 会话 Cookie 是否只在 HTTPS 上下发。做了 TLS 的反代后面**必须设为 `true`**；明文 HTTP 下设成 `true` 会导致 Cookie 不下发、登录不进去 |
 | `MCP_GATEWAY_BASE_URL` | 建议 | `http://127.0.0.1:8080` | 接入 JSON 里的地址。必须是 **Agent 实际能访问到**的地址 |
@@ -975,7 +975,7 @@ java -jar target/mcp-gateway-1.0.0.jar
 
 ```bash
 export MCP_GATEWAY_MASTER_KEY=$(openssl rand -base64 32)
-export MCP_GATEWAY_ADMIN_PASSWORD='<至少 12 位的口令>'
+export MCP_GATEWAY_ADMIN_PASSWORD='<至少 8 位的口令>'
 export MCP_GATEWAY_BASE_URL=http://<Agent 能访问到的地址>:8080
 docker compose up -d --build
 ```
@@ -1155,7 +1155,7 @@ java -jar app.jar --logging.level.com.mcpgateway=DEBUG
 
 需求 3.2 不含权限系统。这里有的是一个口令，没有的是角色、多账号和审计追责：
 
-- 凭证只来自环境变量，没有默认值，缺失或短于 12 位时**启动失败**
+- 凭证只来自环境变量，没有默认值，缺失或短于 8 位时**启动失败**
 - **改口令要重启**，界面上没有改密入口，也没有找回密码通道
 - 登录失败按来源 IP 限速：连续 5 次锁 5 分钟，锁定期间不比对口令。
   **反向代理后面所有请求的来源 IP 相同**，此时限速会退化成全局的
