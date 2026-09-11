@@ -383,7 +383,9 @@ MCP 地址那一列带复制按钮 —— 配 Agent 时要的就是这个地址�
   右边并排显示成功率 —— 分面回答"有多少"，成功率回答"要不要紧"
 - 时间范围有 15 分钟 / 1 小时 / 24 小时 / 7 天四个快捷键，也可以「自定义…」填起止时刻
 - 可按聚合工具名（包含匹配，`kb_a__` 能筛出一整个子 MCP）、子 MCP、`trace_id` 筛
-- 点 `trace_id` 直接按那条链路筛，点工具名按那个工具筛（需求 15.4.3）
+- 点 `trace_id` 直接按那条链路筛，点工具名按那个工具筛（需求 15.4.3）。
+  注意这里**区分不出上游传入的 trace_id 和网关自生成的**，原因见 §9.2 的字段要点；
+  另外 `trace_id` 那一格的悬停提示被"按这条链路筛选"占着，要看全值用它旁边的复制按钮
 - **生效中的条件以标签形式显示在表格上沿**，每条都能单独撤销。翻到第 3 页时筛选表单
   早滚出视野了，"怎么就这几条"十有八九是忘了自己还开着一个条件
 
@@ -1076,7 +1078,14 @@ DELETE FROM tool_call_record WHERE started_at < '2026-06-01';
 - `status`：`STARTED` → `SUCCESS` / `ERROR` / `TIMEOUT`，两阶段写入
 - `downstream_mcp_id` 和 `original_tool_name` 为空 = 未知工具或停用工具的调用（无法确定目标）
 - `request_json` / `response_json` **不截断**，体积上界由请求/响应大小限制兜住
-- `trace_id` 优先取上游的 `traceparent`（只取中间的 trace-id 段），其次 `X-Trace-Id`、`X-Request-Id`、`X-Correlation-Id`，都没有才生成；上游值会做字符过滤和限长
+- `call_id` 是主键，网关在每次调用入口处自生成的 UUID，与记录严格一对一，详情接口按它取单条
+- `trace_id` 优先取上游的 `traceparent`（只取中间的 trace-id 段），其次 `X-Trace-Id`、`X-Request-Id`、`X-Correlation-Id`，都没有才生成；上游值会做字符过滤和限长。
+  它**可以重复** —— 同一条上游链路下的多次调用共享一个值，所以建的是普通索引而非唯一约束。
+  想按链路聚合就查 `WHERE trace_id = ?`
+- **上游有没有带 trace_id，库里和界面上都看不出来**：表里只有一列 `trace_id`，没有来源标记位，
+  自生成的值和上游传入的值后续完全同形。自生成的是带连字符的 UUID、`traceparent` 取出来的是
+  32 位无连字符 hex，但 `X-Request-Id` 走的是原样使用分支，上游完全可以传一个 UUID 进来。
+  间接判断：按某个 `trace_id` 筛只回来一条，大概率是网关自己生成的（也可能是该链路只调了一次工具）
 
 **打点绝不影响调用结果** —— 每次写入用 `REQUIRES_NEW` 开独立事务并吞掉自身异常，只留错误日志和 `mcp.gateway.call.record.failures` 指标。
 

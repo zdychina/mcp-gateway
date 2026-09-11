@@ -335,8 +335,12 @@ docker compose up -d --build
   全部吞掉，只留错误日志和 `mcp.gateway.call.record.failures` 指标。
 - **脱敏**（FR-06.3）：打点服务只接收工具参数和结果，拿不到任何请求头；错误摘要与返回给 Agent
   的是同一份已脱敏文案。
+- `call_id` 与 `trace_id` 的分工：`call_id` 是网关自生成的 UUID、表主键，与记录一对一，用来定位
+  "这一次调用"；`trace_id` 用来把"一串相关调用"串起来，可以重复，因此是普通索引而非唯一约束。
 - `trace_id` 优先取上游的 `traceparent`（只取中间的 trace-id 段）、`X-Trace-Id`、`X-Request-Id`、
   `X-Correlation-Id`，都没有才生成。上游值不可信，会做字符过滤和限长。
+  **没有记录来源**：自生成的值与上游传入的值落库后同形，分不出是哪种 —— 上游没带链路头时
+  `trace_id` 实际也是一对一的，看着像冗余字段。要分清得在打点时额外落一列来源。
 - 输入输出按原始 JSON 保存，不截断（FR-06.4）。体积上界由请求体和下游响应体的大小限制兜住。
 - 进程异常退出遗留的 `STARTED` 记录，下次启动时被标记为 `ERROR`（需求 13.2）。
 - 指标经 Micrometer 暴露；actuator 的 web 端点默认只放开 `health`。
