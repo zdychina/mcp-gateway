@@ -1,10 +1,10 @@
-# 升级指导书：`main` → `dev`
+# 升级指导书：V1.0 → V1.1
 
 | | |
 | --- | --- |
 | 升级前 | `main` @ `ae80286`（版本号改从 build-info 读，不再写死在代码里） |
-| 升级后 | `dev` @ `02d2057`（加升级指导书；功能与 `238b78a` 相同，那之后只多了文档） |
-| 中间跨越 | 9 个提交 |
+| 升级后 | `fee8ffc`（`main` 与 `dev` 同点）。功能上比 `238b78a` 多一项：管理端口令下限从 12 位降到 8 位（`fe44c2a`），其余只是文档 |
+| 中间跨越 | 13 个提交 |
 | 数据库迁移 | 1 个（`V2__call_record_started_at_index.sql`，纯加索引） |
 | 预计停机 | 一次重启的时间（约 15～30 秒），**无法做到零停机**，原因见 §2.1 |
 
@@ -112,11 +112,11 @@ openssl rand -base64 18
 
 ```bash
 git fetch origin
-git checkout dev            # 确认在 02d2057 或更新
+git checkout main           # 确认在 fee8ffc 或更新
 git log -1 --format='%h %s'
 
 mvn -B clean package
-# 产物：target/mcp-gateway-1.0.0.jar
+# 产物：target/mcp-gateway-1.1.0.jar
 ```
 
 > 这次新增了 `spring-boot-starter-security` 和 `poi-ooxml` 两个依赖。
@@ -147,7 +147,7 @@ MCP_GATEWAY_COOKIE_SECURE=true                # 前面有 TLS 反代才设 true�
 **4. 换 jar 并启动**
 
 ```bash
-cp target/mcp-gateway-1.0.0.jar /opt/mcp-gateway/mcp-gateway.jar
+cp target/mcp-gateway-1.1.0.jar /opt/mcp-gateway/mcp-gateway.jar
 sudo systemctl start mcp-gateway
 sudo journalctl -u mcp-gateway -f
 ```
