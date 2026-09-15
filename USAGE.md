@@ -973,6 +973,10 @@ MCP_GATEWAY_BASE_URL='http://127.0.0.1:8080' \
 java -jar target/mcp-gateway-1.2.1.jar
 ```
 
+> 要挂在子路径下（`https://host/kbmcp`）的，构建命令不一样 —— 前缀必须在打包时就带上
+> （`mvn -Dvite.base.path=/kbmcp ... package`），事后改环境变量补不回来。见
+> [DEPLOY.md 的「挂在子路径下」](DEPLOY.md#挂在子路径下)。
+
 ### 8.2 Docker Compose
 
 ```bash

@@ -3,8 +3,8 @@
 | | |
 | --- | --- |
 | 升级前 | `main` @ `1cb035f`（版本号升到 1.1.0，`main` 与 `dev` 同点） |
-| 升级后 | `dev` @ `26a0544`（支持挂在子路径下部署，版本号 1.2.0） |
-| 中间跨越 | 1 个提交（本指导书是其后的纯文档提交，不影响运行） |
+| 升级后 | `dev` @ `56aa4bc`（支持挂在子路径下部署 + 重定向修复，版本号 1.2.1） |
+| 中间跨越 | 3 个提交（其中 1 个是本指导书自己，纯文档） |
 | 数据库迁移 | **0 个**。库结构和数据一个字节都不动 |
 | 预计停机 | 一次重启的时间（约 15～30 秒），**无法做到零停机**，原因见 §2.1 |
 
@@ -26,7 +26,8 @@
 | 新增 `MCP_GATEWAY_CONTEXT_PATH`，默认空 | **不设就是原样**。只有要挂子路径时才用得上 |
 | 构建新增 `-Dvite.base.path` 参数，默认空 | 同上。Docker 对应的是 `VITE_BASE_PATH` 构建参数 |
 | `docker-compose.yml` 的 `build` 从简写改成长格式（多了 `args`） | 自定义过 compose 文件的要手工合并这一段，见 §3.3 |
-| 版本号 1.1.0 → 1.2.0 | jar 文件名跟着变。systemd 的 `ExecStart` 如果写死了版本号，要一起改 |
+| **重定向改发相对地址** | 做了 TLS 反代的部署这条是修复：以前 `https://host/` 会收到 `Location: http://host/ui/gateways`，把人从 443 甩到 80 |
+| 版本号 1.1.0 → 1.2.1 | jar 文件名跟着变。systemd 的 `ExecStart` 如果写死了版本号，要一起改 |
 
 ### 1.1 新增的环境变量
 
@@ -38,7 +39,7 @@
 
 ### 1.2 默认行为与 1.1.0 完全一致（已实测）
 
-不设 `MCP_GATEWAY_CONTEXT_PATH` 时，1.2.0 的 jar 实测结果：
+不设 `MCP_GATEWAY_CONTEXT_PATH` 时，1.2.1 的 jar 实测结果：
 
 ```
 /                 -> 302 /ui/gateways
@@ -77,7 +78,7 @@ Set-Cookie: XSRF-TOKEN=...; Path=/; SameSite=Strict
 唯一的影响是重启期间那十几秒，Agent 的调用会失败。
 
 有一个无害的可见变化：MCP `initialize` 的响应里，服务端自报的 `version` 会从 `1.1.0`
-变成 `1.2.0`（取自 build-info）。协议行为不变。
+变成 `1.2.1`（取自 build-info）。协议行为不变。
 
 ### 2.3 回滚没有任何代价
 
@@ -114,8 +115,10 @@ git checkout dev            # 确认在 26a0544 或更新
 git log -1 --format='%h %s'
 
 mvn -B clean package
-# 产物：target/mcp-gateway-1.2.0.jar
+# 产物：target/mcp-gateway-1.2.1.jar
 ```
+
+> **要挂子路径的别用这条命令** —— 它打出来的 jar 不带前缀，装上去是白屏。用 §3.2 那条。
 
 > **依赖没有新增**，上次那两个新依赖（`spring-boot-starter-security`、`poi-ooxml`）已经在
 > 1.1.0 里了。前端构建仍需能访问 nodejs.org 和 npm registry。
@@ -130,7 +133,7 @@ ss -lntp | grep 8080        # 确认端口已释放，H2 的锁跟着进程走
 **3. 换 jar 并启动**
 
 ```bash
-cp target/mcp-gateway-1.2.0.jar /opt/mcp-gateway/mcp-gateway.jar
+cp target/mcp-gateway-1.2.1.jar /opt/mcp-gateway/mcp-gateway.jar
 sudo systemctl start mcp-gateway
 sudo journalctl -u mcp-gateway -f
 ```
@@ -147,7 +150,7 @@ necessary.` —— 这次没有迁移，看到它才是对的。
 
 | 改哪里 | 怎么写 | 漏了的症状 |
 | --- | --- | --- |
-| 构建 | `mvn -Dvite.base.path=/kbmcp clean package` | 页面能打开但资源全 404（白屏），接口打到同域的别的应用上 |
+| 构建 | `mvn -Dvite.base.path=/kbmcp -DskipTests -Dfrontend.test.skip=true clean package` | 页面能打开但资源全 404（白屏），接口打到同域的别的应用上 |
 | 运行 | `MCP_GATEWAY_CONTEXT_PATH=/kbmcp` | 整个前缀 404 |
 | 反代 | 转发时**不要**剥掉前缀 | 剥两次等于没设，同样 404 |
 
@@ -157,6 +160,15 @@ necessary.` —— 这次没有迁移，看到它才是对的。
 
 **前缀是打进 jar 的。** 前端资源地址在 `index.html` 里是绝对路径，只能构建期确定，所以同一份
 产物不能既挂根路径又挂 `/kbmcp`；换前缀要重新构建，不是改个环境变量重启。
+
+打完先验产物再传 —— 漏了参数的 jar 照样能打出来、服务照样能起来、页面照样返回 200，
+只是白屏，一路到浏览器才发现：
+
+```bash
+unzip -p target/mcp-gateway-1.2.1.jar BOOT-INF/classes/static/app/index.html | grep -o 'src="[^"]*"'
+# 期望 src="/kbmcp/app/assets/index-xxxx.js"
+# 出现 src="/app/assets/..." 就是漏了 -Dvite.base.path，重打，别传
+```
 
 Nginx 的写法（`proxy_pass` 结尾**不带路径**，这正是"不剥前缀"的写法；一旦写成
 `proxy_pass http://127.0.0.1:8080/;` 就会把前缀剥掉）：
@@ -198,7 +210,7 @@ location = /kbmcp { return 301 /kbmcp/; }
       context: .
       args:
         VITE_BASE_PATH: ${MCP_GATEWAY_CONTEXT_PATH:-}
-    image: mcp-gateway:1.2.0
+    image: mcp-gateway:1.2.1
 ```
 
 **自定义过 compose 文件的人要手工合并这一段**，直接用仓库里的新版覆盖会丢掉你的改动。
@@ -245,13 +257,13 @@ curl -s http://127.0.0.1:8080/actuator/health
 # 期望 {"status":"UP"}
 ```
 
-**② 换上去的确实是 1.2.0**
+**② 换上去的确实是 1.2.1**
 
 jar 里的 `build-info` 就是版本号的唯一来源（`GatewayVersion` 读的也是它）：
 
 ```bash
 unzip -p /opt/mcp-gateway/mcp-gateway.jar META-INF/build-info.properties | grep version
-# 期望 build.version=1.2.0
+# 期望 build.version=1.2.1
 ```
 
 看文件名不算数 —— 复制的时候改个名就对不上了。

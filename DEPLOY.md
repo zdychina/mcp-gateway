@@ -43,6 +43,23 @@ mvn -DskipTests -Dfrontend.test.skip=true package
 
 产物：`target/mcp-gateway-1.2.1.jar`，管理前端已随 jar 一起打进去，不需要单独部署。
 
+**要挂在子路径下（`/kbmcp` 这类前缀）的，这一步就必须带上前缀**，后面再补是补不了的：
+
+```bash
+mvn -Dvite.base.path=/kbmcp -DskipTests -Dfrontend.test.skip=true clean package
+```
+
+漏了这个参数，jar 照样能打出来、服务照样能起来、页面照样返回 200 —— 只是白屏，因为
+入口文档里的资源地址不带前缀，浏览器去了同域上别的应用那里。所以**打完先验产物再传**：
+
+```bash
+unzip -p target/mcp-gateway-1.2.1.jar BOOT-INF/classes/static/app/index.html | grep -o 'src="[^"]*"'
+# 期望 src="/kbmcp/app/assets/index-xxxx.js"
+# 出现 src="/app/assets/..." 就是漏了 -Dvite.base.path，重打，别传
+```
+
+详见下面的[「挂在子路径下」](#挂在子路径下)。
+
 两点说明：
 
 - `-DskipTests` 只对 surefire 生效，管不到 npm，所以 `-Dfrontend.test.skip=true` 要单独给。
@@ -146,9 +163,12 @@ systemd 虽然有 `WorkingDirectory`，仍然建议显式写绝对路径。
 
 | 改哪里 | 怎么写 | 漏了的症状 |
 | --- | --- | --- |
-| 构建 | `mvn -Dvite.base.path=/kbmcp package` | 页面能打开，但资源全 404（白屏），接口打到同域的别的应用上 |
+| 构建 | `mvn -Dvite.base.path=/kbmcp -DskipTests -Dfrontend.test.skip=true clean package` | 页面能打开，但资源全 404（白屏），接口打到同域的别的应用上 |
 | 运行 | `MCP_GATEWAY_CONTEXT_PATH=/kbmcp` | 整个前缀 404 |
 | 反代 | 转发时**不要**剥掉前缀 | 剥两次等于没设，同样 404 |
+
+第一行是实际踩过的那个坑：照着[「一、构建」](#一构建)抄了不带参数的命令，一路到浏览器
+才发现白屏。验产物的命令见那一节，五秒钟的事。
 
 外加一个不报错的：`MCP_GATEWAY_BASE_URL` 要写到前缀为止（`https://host/kbmcp`），
 否则给 Agent 的接入 URL 会少一截 —— 管理界面一切正常，只有 Agent 连不上。
