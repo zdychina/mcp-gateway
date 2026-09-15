@@ -58,6 +58,7 @@ PowerShell 下：
 | `MCP_GATEWAY_BIND_ADDRESS` | 否 | `127.0.0.1` | 默认只监听 localhost（需求 12.6 / 4.3）。有了登录之后绑内网地址是可选项，但默认值不变 |
 | `MCP_GATEWAY_COOKIE_SECURE` | 否 | `false` | 会话 Cookie 是否只在 HTTPS 上下发。**放在做了 TLS 的反向代理后面时必须设为 `true`** |
 | `MCP_GATEWAY_PORT` | 否 | `8080` | |
+| `MCP_GATEWAY_CONTEXT_PATH` | 否 | 空 | 子路径部署的前缀，如 `/kbmcp`。**必须与构建时的 `-Dvite.base.path` 同值**，且反代不要剥前缀，见 [DEPLOY.md](DEPLOY.md#挂在子路径下) |
 | `MCP_GATEWAY_DB_PATH` | 否 | `./data/mcp-gateway` | H2 文件库路径。库里含知识库返回内容，需按部署要求保护（FR-06.4） |
 | `MCP_GATEWAY_ALLOWED_ORIGINS` | 否 | 空 | 逗号分隔。内网部署时显式配置允许来源 |
 | `MCP_GATEWAY_DOWNSTREAM_INSECURE_SKIP_TLS_VERIFY` | 否 | `false` | 关掉子 MCP 的证书链与主机名校验。只为"内网自签证书且拿不到根证书"存在，见 [SECURITY.md](SECURITY.md#下游-tls-校验) |
@@ -124,9 +125,9 @@ mvn -Psecurity verify -Dnvd.api.key=<你的 NVD API Key>
 发版按这个顺序，**先改版本再打标签**：
 
 ```bash
-mvn versions:set -DnewVersion=1.1.0 -DgenerateBackupPoms=false   # 去掉 -SNAPSHOT
-git commit -am "发布 1.1.0" && git push
-git tag v1.1.0 && git push origin v1.1.0
+mvn versions:set -DnewVersion=1.2.0 -DgenerateBackupPoms=false   # 去掉 -SNAPSHOT
+git commit -am "发布 1.2.0" && git push
+git tag v1.2.0 && git push origin v1.2.0
 ```
 
 标签构建通过后，会用**同一份已过门禁的 jar**（不重新构建）建一个 GitHub Release，

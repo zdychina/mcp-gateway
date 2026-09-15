@@ -4,17 +4,18 @@ import GatewayDetailView from '../views/GatewayDetailView.vue'
 import CallRecordsView from '../views/CallRecordsView.vue'
 import LoginView from '../views/LoginView.vue'
 import { useSession } from '../composables/useSession'
+import { BASE_PATH } from '../basePath'
 
 /*
- * history 的 base 是 /ui/，与 Thymeleaf 时代的页面地址保持一致 ——
- * 已有的书签和文档里的链接不会失效。
+ * history 的 base 是 `${BASE_PATH}/ui/`：/ui/ 与 Thymeleaf 时代的页面地址保持一致 ——
+ * 已有的书签和文档里的链接不会失效；BASE_PATH 是子路径部署时的前缀，默认空串。
  *
  * 服务端把 /ui/** 全部转发给 SPA 的入口文档（见 GatewayPageController），
  * 所以直接访问、刷新、后退都能落到正确的路由上，新增路由不需要动 Java。
  * /ui/** 在 SecurityConfig 里是公开的 —— 未登录时要靠它把登录页本身发出来。
  */
 export const router = createRouter({
-  history: createWebHistory('/ui/'),
+  history: createWebHistory(`${BASE_PATH}/ui/`),
   routes: [
     { path: '/', redirect: '/gateways' },
     { path: '/login', name: 'login', component: LoginView, meta: { public: true } },

@@ -7,6 +7,7 @@ import { useTheme } from './composables/useTheme'
 import { useSession } from './composables/useSession'
 import { useAlerts } from './composables/useAlerts'
 import { ApiError } from './api/client'
+import { BASE_PATH } from './basePath'
 
 const { theme, resolvedIsDark, toggle } = useTheme()
 const session = useSession()
@@ -43,7 +44,11 @@ async function signOut(): Promise<void> {
 <template>
   <nav class="navbar">
     <div class="container">
-      <a class="navbar-brand" href="/ui/gateways">
+      <!--
+        品牌链接刻意是整页跳转的 <a> 而不是 RouterLink —— 它同时是"回到已知状态"的
+        逃生口。既然是真实地址，子路径部署时就得带上前缀，否则会跳出本应用。
+      -->
+      <a class="navbar-brand" :href="`${BASE_PATH}/ui/gateways`">
         <AppIcon class="logo" name="hub" :size="18" />
         MCP 聚合网关
       </a>

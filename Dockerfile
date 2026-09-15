@@ -13,10 +13,17 @@ RUN mvn -B -q dependency:go-offline
 # 注意这一步需要能访问 nodejs.org 和 npm registry；完全离线的构建环境需要预置镜像源。
 COPY frontend ./frontend
 COPY src ./src
+# 子路径部署的前缀，例如 /kbmcp。默认空 —— 应用占据整个根路径。
+#
+# 是 ARG 不是 ENV，因为前缀只能在构建期定下来：前端资源地址在 index.html 里是绝对路径，
+# 打进镜像之后就改不动了。运行期的 MCP_GATEWAY_CONTEXT_PATH 必须与它同值，
+# 少一边都是坏的 —— 见 DEPLOY.md 的「挂在子路径下」。
+ARG VITE_BASE_PATH=""
+
 # 镜像构建不跑测试：测试需要真实的随机端口和临时数据库，属于 CI 的职责。
 # CI 应当先 `mvn verify`（含覆盖率门禁）通过，再来构建镜像。
 # frontend.test.skip 要单独给 —— Maven 的 skipTests 只对 surefire 生效，管不到 npm。
-RUN mvn -B -q -DskipTests -Dfrontend.test.skip=true package
+RUN mvn -B -q -DskipTests -Dfrontend.test.skip=true -Dvite.base.path="$VITE_BASE_PATH" package
 
 # ---------------------------------------------------------------- 运行阶段
 FROM eclipse-temurin:21-jre-noble AS runtime

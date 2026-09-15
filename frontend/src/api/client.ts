@@ -1,4 +1,5 @@
 import type { ApiResponse } from './types'
+import { BASE_PATH } from '../basePath'
 
 /**
  * 带稳定错误码的请求失败。
@@ -63,7 +64,14 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
     }
   }
 
-  const response = await fetch(url, init)
+  /*
+   * 子路径部署时才有前缀，默认空串。加在这里而不是各个 api/*.ts 里，是因为那些地方
+   * 写的是"哪个接口"，而前缀说的是"这套应用挂在哪"—— 两件事，混在一起就会漏掉一处，
+   * 而漏掉的那一处会把请求发给同域上的另一个应用，拿回一个不属于本应用的 404。
+   *
+   * 下面判断 401 用的仍是不带前缀的 url：那是在认接口，不是在认地址。
+   */
+  const response = await fetch(BASE_PATH + url, init)
 
   /*
    * 会话过期或未登录。认证接口自己会返回 401（口令错），那是登录页要显示的错误，
@@ -98,7 +106,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
  * 所以要按响应的内容类型分流，否则一个 400 会被当成一份 0 字节的 Excel 存到磁盘上。
  */
 async function download(url: string): Promise<{ blob: Blob, headers: Headers }> {
-  const response = await fetch(url, { headers: { Accept: '*/*' } })
+  const response = await fetch(BASE_PATH + url, { headers: { Accept: '*/*' } })
 
   if (response.status === 401 && !url.startsWith('/api/auth/')) {
     onUnauthorized?.()

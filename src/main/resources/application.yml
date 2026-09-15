@@ -22,6 +22,18 @@ spring:
 
 server:
   servlet:
+    # 挂在子路径下部署时的前缀，例如 /kbmcp。默认空 —— 应用占据整个根路径。
+    #
+    # 设了它之后 /ui /api /mcp /app 会整体搬到前缀下面，但 Java 侧一行都不用改：
+    # 容器在交给 Spring 之前就把前缀剥掉了，SecurityConfig 的路径匹配、/mcp/* 的
+    # servlet 注册、redirect:/ui/gateways 看到的仍然是不带前缀的地址。
+    #
+    # 两件必须跟着一起做的事：
+    #   - 反向代理转发时**不要**剥前缀（nginx 里 proxy_pass 结尾不带路径），剥两次就没了；
+    #   - 前端产物要用同一个前缀构建（VITE_BASE_PATH，见 frontend/vite.config.ts）——
+    #     index.html 里的资源地址是绝对路径，前缀对不上就是一片 404。
+    # 详见 DEPLOY.md 的「挂在子路径下」。
+    context-path: ${MCP_GATEWAY_CONTEXT_PATH:}
     # 管理端登录会话（需求 12.8）。会话存在服务端内存里，Cookie 只带一个猜不到的会话 ID。
     session:
       # 闲置超时。管理端是低频操作界面，短一点没有代价。

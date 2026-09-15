@@ -13,7 +13,7 @@
 
   <groupId>com.mcpgateway</groupId>
   <artifactId>mcp-gateway</artifactId>
-  <version>1.1.0</version>
+  <version>1.2.0</version>
   <name>MCP Aggregation Gateway</name>
   <description>轻量 MCP 聚合网关</description>
 
@@ -36,6 +36,16 @@
 
     <node.version>v24.15.0</node.version>
     <frontend-maven-plugin.version>1.15.1</frontend-maven-plugin.version>
+    <!--
+      子路径部署的前缀，例如 `mvn -Dvite.base.path=/kbmcp package`。默认空 ——
+      应用占据整个根路径，这是绝大多数部署的形态。
+
+      它被注入前端构建（见下面 npm-build 那个 execution），因此**前缀是打进 jar 的**：
+      同一份产物不能既挂在根路径又挂在 /kbmcp 下，换前缀要重新构建。运行时还必须把
+      server.servlet.context-path 设成同一个值，两边少一边都是坏的。
+      详见 DEPLOY.md 的「挂在子路径下」。
+    -->
+    <vite.base.path></vite.base.path>
     <!--
       跳过前端构建：`mvn -Dfrontend.skip=true verify`。
       只在本地已经手工跑过 `npm run build` 时才用 —— 页面测试依赖
@@ -214,6 +224,13 @@
             <configuration>
               <!-- 含 vue-tsc 类型检查，类型不过就让构建失败 -->
               <arguments>run build</arguments>
+              <!--
+                显式传，而不是依赖 npm 继承 Maven 进程的环境 —— 那样 `-Dvite.base.path=`
+                这种 Maven 侧的写法就不生效，而命令行传参正是部署时最可能用的形式。
+              -->
+              <environmentVariables>
+                <VITE_BASE_PATH>${vite.base.path}</VITE_BASE_PATH>
+              </environmentVariables>
             </configuration>
           </execution>
           <!--

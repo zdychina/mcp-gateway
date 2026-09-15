@@ -41,7 +41,7 @@
 mvn -DskipTests -Dfrontend.test.skip=true package
 ```
 
-产物：`target/mcp-gateway-1.1.0.jar`，管理前端已随 jar 一起打进去，不需要单独部署。
+产物：`target/mcp-gateway-1.2.0.jar`，管理前端已随 jar 一起打进去，不需要单独部署。
 
 两点说明：
 
@@ -119,7 +119,8 @@ MCP_GATEWAY_BASE_URL=http://192.168.1.10:8080   # 告诉 Agent 走这个具体 I
 ```
 
 - `BASE_URL` 里**绝不能写 `0.0.0.0`** —— 那是"任意地址"的占位符，不是可连接的地址。
-- `BASE_URL` 只写到端口，不带路径；网关会自己接上 `/mcp/{slug}`。
+- `BASE_URL` 一般只写到端口，不带路径；网关会自己接上 `/mcp/{slug}`。
+  例外是挂在子路径下部署，那时它要写到前缀为止（`https://host/kbmcp`），见下。
 - 只设 `BASE_URL` 而不动 `BIND_ADDRESS`，进程仍然只听 `127.0.0.1`，Agent 连过去是
   connection refused —— 这是最常见的一个坑。
 
@@ -134,6 +135,68 @@ MCP_GATEWAY_BASE_URL=https://mcp.example.com    # Agent 走域名和 443
 
 默认值 `./data/mcp-gateway` 是相对**当前工作目录**的，换个目录启动就等于换了个空库。
 systemd 虽然有 `WorkingDirectory`，仍然建议显式写绝对路径。
+
+### 挂在子路径下
+
+默认部署里本应用占着整个根路径：`/ui`（管理界面）、`/api`（管理接口）、`/app`（前端资源）、
+`/mcp`（Agent 端点）。同一个域名上已经有别的应用占了 `/api` 之类的地址时，就得把这四类
+地址整体搬到一个前缀下面，例如 `https://host/kbmcp`。
+
+要改**三个地方**，少一个都是坏的，而且坏法各不相同：
+
+| 改哪里 | 怎么写 | 漏了的症状 |
+| --- | --- | --- |
+| 构建 | `mvn -Dvite.base.path=/kbmcp package` | 页面能打开，但资源全 404（白屏），接口打到同域的别的应用上 |
+| 运行 | `MCP_GATEWAY_CONTEXT_PATH=/kbmcp` | 整个前缀 404 |
+| 反代 | 转发时**不要**剥掉前缀 | 剥两次等于没设，同样 404 |
+
+外加一个不报错的：`MCP_GATEWAY_BASE_URL` 要写到前缀为止（`https://host/kbmcp`），
+否则给 Agent 的接入 URL 会少一截 —— 管理界面一切正常，只有 Agent 连不上。
+
+Docker Compose 部署只需在 `.env` 里设一个 `MCP_GATEWAY_CONTEXT_PATH=/kbmcp`：compose
+把同一个变量既喂给构建参数 `VITE_BASE_PATH` 又喂给运行环境，两端不可能对不上。
+但**改完要 `docker compose build`**，光 `up -d` 不会重打前端。
+
+**前缀是打进 jar 的。** 前端资源地址在 index.html 里是绝对路径，只能构建期确定，所以同一份
+产物不能既挂根路径又挂 `/kbmcp`；换前缀要重新构建，而不是改个环境变量重启。运行期的
+`MCP_GATEWAY_CONTEXT_PATH` 必须与构建时的 `-Dvite.base.path` 是同一个值。
+
+Nginx 的写法（注意 `proxy_pass` 结尾**不带路径**，这正是"不剥前缀"的写法；一旦写成
+`proxy_pass http://127.0.0.1:8080/;` 就会剥掉前缀）：
+
+```nginx
+location /kbmcp/ {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    # /kbmcp/mcp/{slug} 是 Streamable HTTP，响应可能是长连 SSE。
+    # 缓冲开着的话事件会被 nginx 攒住不下发，Agent 看起来就是"卡住"。
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+}
+
+# 不带尾斜杠的 /kbmcp 也能进去
+location = /kbmcp { return 301 /kbmcp/; }
+```
+
+顺带一个好处：会话 Cookie 和 CSRF 令牌 Cookie 的 `Path` 会自动收到 `/kbmcp` 上，
+与同域其他应用在 `/` 上种的同名 Cookie 不会互相覆盖。
+
+验证（前缀内通、前缀外不通，两半都要看）：
+
+```bash
+curl -sI http://127.0.0.1:8080/kbmcp/ui/gateways | head -1   # 200
+curl -sI http://127.0.0.1:8080/ui/gateways       | head -1   # 404
+# 入口文档里的资源地址应当带着前缀
+curl -s http://127.0.0.1:8080/kbmcp/ui/gateways | grep -o 'src="[^"]*"'
+```
+
+这条路径由 `SubPathDeploymentTest`（服务端）和 `frontend/test/base-path.spec.ts`（前端）守着。
 
 ## 四、以 systemd 运行
 
@@ -169,7 +232,7 @@ User=mcpgw
 Group=mcpgw
 WorkingDirectory=/opt/mcp-gateway
 EnvironmentFile=/opt/mcp-gateway/env
-ExecStart=/usr/bin/java -XX:MaxRAMPercentage=75.0 -jar /opt/mcp-gateway/mcp-gateway-1.1.0.jar
+ExecStart=/usr/bin/java -XX:MaxRAMPercentage=75.0 -jar /opt/mcp-gateway/mcp-gateway-1.2.0.jar
 Restart=on-failure
 RestartSec=5
 
@@ -261,3 +324,5 @@ H2 是文件库且以 `AUTO_SERVER=FALSE` 打开（单机单进程，需求 14�
 | 重启后数据像是空的 | `MCP_GATEWAY_DB_PATH` 是相对路径，换工作目录启动指到了别的库 |
 | 起不来，报文件锁 | 已经有一个实例占着同一个 H2 库 |
 | 浏览器访问 MCP 端点 403 | Origin 校验（需求 12.6）。非浏览器客户端不带 Origin 头，不受影响 |
+| 子路径部署下页面白屏、资源 404 | 构建时没给 `-Dvite.base.path`，或它与 `MCP_GATEWAY_CONTEXT_PATH` 不是同一个值 |
+| 子路径部署下整个前缀 404 | 反代把前缀剥掉了（`proxy_pass` 结尾带了路径），或没设 `MCP_GATEWAY_CONTEXT_PATH` |

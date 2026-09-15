@@ -1,7 +1,13 @@
 services:
   mcp-gateway:
-    build: .
-    image: mcp-gateway:1.1.0
+    build:
+      context: .
+      args:
+        # 子路径部署的前缀。与下面的 MCP_GATEWAY_CONTEXT_PATH 读同一个变量，
+        # 这样构建期和运行期不可能对不上 —— 对不上的症状是页面白屏或整个前缀 404。
+        # 改了它必须重新 build，光 up 不生效（前端资源地址已经打进镜像了）。
+        VITE_BASE_PATH: ${MCP_GATEWAY_CONTEXT_PATH:-}
+    image: mcp-gateway:1.2.0
     container_name: mcp-gateway
     restart: unless-stopped
 
@@ -18,6 +24,9 @@ services:
       # 不能用容器内部的 127.0.0.1（需求 FR-05.1）。
       MCP_GATEWAY_BASE_URL: ${MCP_GATEWAY_BASE_URL:-http://127.0.0.1:8080}
       MCP_GATEWAY_ALLOWED_ORIGINS: ${MCP_GATEWAY_ALLOWED_ORIGINS:-}
+      # 挂在子路径下时的前缀，如 /kbmcp。默认空，应用占据整个根路径。
+      # 它同时是上面 build.args 的输入，两处必须同值，所以只在这一个变量里写。
+      MCP_GATEWAY_CONTEXT_PATH: ${MCP_GATEWAY_CONTEXT_PATH:-}
       # 关掉子 MCP 的 TLS 证书与主机名校验。默认 false，保持这样。
       # 只有"内网自签证书 + 拿不到根证书"这一种情况才设 true —— 打开之后下游凭证会在
       # 无法验证对方身份的连接上传输。更好的做法是把 CA 导进信任库，见 SECURITY.md。
