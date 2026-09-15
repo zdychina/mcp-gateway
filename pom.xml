@@ -13,7 +13,7 @@
 
   <groupId>com.mcpgateway</groupId>
   <artifactId>mcp-gateway</artifactId>
-  <version>1.2.0</version>
+  <version>1.2.1</version>
   <name>MCP Aggregation Gateway</name>
   <description>轻量 MCP 聚合网关</description>
 

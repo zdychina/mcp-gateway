@@ -52,6 +52,18 @@ server:
       # 静态资源（app.js / app.css）里有中文注释与文案。Spring 默认以 text/javascript
       # 不带 charset 返回，浏览器只能回退到文档编码去猜。强制声明 UTF-8 去掉这个依赖。
       force-response: true
+  tomcat:
+    # 重定向发相对地址（Location: /ui/gateways），而不是绝对地址。
+    #
+    # 默认的绝对地址是由 Tomcat 自己那条连接拼出来的，而反向代理与它之间几乎总是明文
+    # HTTP —— 于是 https://host/ 的请求会收到 Location: http://host/ui/gateways，
+    # 浏览器跳去 80 端口，多数部署那里根本没有监听。子路径部署下更明显：
+    # 那是打开应用的第一跳，一跳就出了本站。
+    #
+    # 为什么不是读 X-Forwarded-Proto（server.forward-headers-strategy）：那要求信任
+    # 客户端可伪造的请求头，而本项目在 FR-05.1 上刚刚拒绝过这件事。相对地址由浏览器
+    # 按当前地址栏解析，一个头都不用信，且在任何前缀、任何协议下都对。
+    use-relative-redirects: true
   # 需求 12.6：本地部署默认只监听 localhost。内网部署需显式覆盖 server.address。
   # 管理端已有登录（见 mcp-gateway.security.admin），绑到内网地址成为可选项 ——
   # 但纵深防御不因为多了一道就撤掉前一道，默认值保持回环。

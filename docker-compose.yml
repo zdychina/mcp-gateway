@@ -7,7 +7,7 @@ services:
         # 这样构建期和运行期不可能对不上 —— 对不上的症状是页面白屏或整个前缀 404。
         # 改了它必须重新 build，光 up 不生效（前端资源地址已经打进镜像了）。
         VITE_BASE_PATH: ${MCP_GATEWAY_CONTEXT_PATH:-}
-    image: mcp-gateway:1.2.0
+    image: mcp-gateway:1.2.1
     container_name: mcp-gateway
     restart: unless-stopped
 

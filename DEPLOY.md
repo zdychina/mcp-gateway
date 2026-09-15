@@ -41,7 +41,7 @@
 mvn -DskipTests -Dfrontend.test.skip=true package
 ```
 
-产物：`target/mcp-gateway-1.2.0.jar`，管理前端已随 jar 一起打进去，不需要单独部署。
+产物：`target/mcp-gateway-1.2.1.jar`，管理前端已随 jar 一起打进去，不需要单独部署。
 
 两点说明：
 
@@ -232,7 +232,7 @@ User=mcpgw
 Group=mcpgw
 WorkingDirectory=/opt/mcp-gateway
 EnvironmentFile=/opt/mcp-gateway/env
-ExecStart=/usr/bin/java -XX:MaxRAMPercentage=75.0 -jar /opt/mcp-gateway/mcp-gateway-1.2.0.jar
+ExecStart=/usr/bin/java -XX:MaxRAMPercentage=75.0 -jar /opt/mcp-gateway/mcp-gateway-1.2.1.jar
 Restart=on-failure
 RestartSec=5
 

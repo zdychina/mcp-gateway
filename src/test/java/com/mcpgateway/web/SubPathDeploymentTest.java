@@ -130,9 +130,20 @@ class SubPathDeploymentTest {
                     HttpResponse.BodyHandlers.discarding());
 
             assertThat(response.statusCode()).isEqualTo(HttpStatus.FOUND.value());
-            // 容器可能回相对地址也可能回绝对地址，两种都对；要紧的是前缀没丢。
+
+            /*
+             * 必须是**相对**地址，一个字符都不能多。
+             *
+             * Tomcat 默认发的绝对地址是由它自己那条连接拼出来的，而反代与它之间几乎总是
+             * 明文 HTTP —— 于是 https://host/kbmcp/ 会收到
+             * Location: http://host/kbmcp/ui/gateways，把人从 443 甩到 80 上。
+             * 这是打开应用的第一跳，一跳就出了本站。
+             *
+             * 线上曾经靠 Chrome 自己把 http 升回 https 遮住过这个问题 —— 正因为它能被
+             * 浏览器行为遮住，才更需要在这里钉死：断言写成 endsWith 就会把那个 bug 放过去。
+             */
             assertThat(response.headers().firstValue("Location")).get(as(STRING))
-                    .endsWith(PREFIX + "/ui/gateways");
+                    .isEqualTo(PREFIX + "/ui/gateways");
         }
     }
 
