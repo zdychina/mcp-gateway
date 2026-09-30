@@ -41,7 +41,7 @@
 mvn -DskipTests -Dfrontend.test.skip=true package
 ```
 
-产物：`target/mcp-gateway-1.2.1.jar`，管理前端已随 jar 一起打进去，不需要单独部署。
+产物：`target/mcp-gateway-1.3.0.jar`，管理前端已随 jar 一起打进去，不需要单独部署。
 
 **要挂在子路径下（`/kbmcp` 这类前缀）的，这一步就必须带上前缀**，后面再补是补不了的：
 
@@ -53,7 +53,7 @@ mvn -Dvite.base.path=/kbmcp -DskipTests -Dfrontend.test.skip=true clean package
 入口文档里的资源地址不带前缀，浏览器去了同域上别的应用那里。所以**打完先验产物再传**：
 
 ```bash
-unzip -p target/mcp-gateway-1.2.1.jar BOOT-INF/classes/static/app/index.html | grep -o 'src="[^"]*"'
+unzip -p target/mcp-gateway-1.3.0.jar BOOT-INF/classes/static/app/index.html | grep -o 'src="[^"]*"'
 # 期望 src="/kbmcp/app/assets/index-xxxx.js"
 # 出现 src="/app/assets/..." 就是漏了 -Dvite.base.path，重打，别传
 ```
@@ -252,7 +252,7 @@ User=mcpgw
 Group=mcpgw
 WorkingDirectory=/opt/mcp-gateway
 EnvironmentFile=/opt/mcp-gateway/env
-ExecStart=/usr/bin/java -XX:MaxRAMPercentage=75.0 -jar /opt/mcp-gateway/mcp-gateway-1.2.1.jar
+ExecStart=/usr/bin/java -XX:MaxRAMPercentage=75.0 -jar /opt/mcp-gateway/mcp-gateway-1.3.0.jar
 Restart=on-failure
 RestartSec=5
 

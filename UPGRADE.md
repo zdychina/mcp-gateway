@@ -1,91 +1,88 @@
-# 升级指导书：V1.1 → V1.2
+# 升级指导书：V1.2 → V1.3
 
 | | |
 | --- | --- |
-| 升级前 | `main` @ `1cb035f`（版本号升到 1.1.0，`main` 与 `dev` 同点） |
-| 升级后 | `dev` @ `56aa4bc`（支持挂在子路径下部署 + 重定向修复，版本号 1.2.1） |
-| 中间跨越 | 3 个提交（其中 1 个是本指导书自己，纯文档） |
-| 数据库迁移 | **0 个**。库结构和数据一个字节都不动 |
+| 升级前 | `main` @ `c3ce5c7`（版本号 1.2.1，`main` 与 `dev` 同点） |
+| 升级后 | `dev` @ `009998d7` + 版本号提交（子 MCP 描述：同步捕获 + 手动覆盖 + 并入 Agent instructions，版本号 1.3.0） |
+| 中间跨越 | 2 个提交 |
+| 数据库迁移 | **1 个**（V3：`downstream_mcp` 加两列可空 CLOB，纯增量） |
 | 预计停机 | 一次重启的时间（约 15～30 秒），**无法做到零停机**，原因见 §2.1 |
 
-**一句话：不用改任何配置，换 jar 重启就完事 —— 除非你要把应用挂到子路径下，那时有三处
-必须同时改，见 §3.2。Java 源码零改动，Agent 完全不受影响。**
+**一句话：换 jar 重启就完事，Flyway 自动加两列，配置一个不用改。Agent 侧不需要任何
+动作；唯一可见变化是重连后 `initialize` 的 `instructions` 可能多出一段"子 MCP"清单。**
 
 ---
 
 ## 1. 这次升级带来什么
 
-只有一件事：**支持把应用挂在子路径下**，例如 `https://host/kbmcp`。
+只有一件事：**子 MCP 也有描述了**。
 
-默认部署里本应用占着整个域名根路径：`/ui`（管理界面）、`/api`（管理接口）、`/app`（前端资源）、
-`/mcp`（Agent 端点）。同一个域名上已经有别的应用占了 `/api` 之类的地址时，以前只能换域名
-或换端口；现在可以把这四类地址整体搬到一个前缀下面。
+以前 Agent 只能从聚合工具名的前缀（`子MCP名__原工具名`）猜每个子 MCP 是干什么的，
+下游自己 `initialize` 时报的 `instructions` 在网关这里被直接丢弃。现在：
+
+- 同步时**自动捕获**下游 `instructions`，存为子 MCP 的"原始描述"（只读；同步失败保留上次捕获）
+- 管理端（界面或 `PUT`）可填**自定义描述**，非空时覆盖原始，留空清除、回退原始
+- 网关对 Agent 的 `instructions` 改为**组合式**：网关描述 + 有描述的子 MCP 清单
 
 | 变更 | 对运维的影响 |
 | --- | --- |
-| 新增 `MCP_GATEWAY_CONTEXT_PATH`，默认空 | **不设就是原样**。只有要挂子路径时才用得上 |
-| 构建新增 `-Dvite.base.path` 参数，默认空 | 同上。Docker 对应的是 `VITE_BASE_PATH` 构建参数 |
-| `docker-compose.yml` 的 `build` 从简写改成长格式（多了 `args`） | 自定义过 compose 文件的要手工合并这一段，见 §3.3 |
-| **重定向改发相对地址** | 做了 TLS 反代的部署这条是修复：以前 `https://host/` 会收到 `Location: http://host/ui/gateways`，把人从 443 甩到 80 |
-| 版本号 1.1.0 → 1.2.1 | jar 文件名跟着变。systemd 的 `ExecStart` 如果写死了版本号，要一起改 |
+| `downstream_mcp` 表加 `original_description` / `custom_description` 两列（V3 迁移） | 启动时 Flyway 自动执行，纯增量，存量行为与 1.2.1 一致 |
+| 网关 `instructions` 变成组合式 | Agent **重连后**拿到的说明文本会变；不重连不受影响。工具、令牌、凭证全都不动 |
+| `PUT /api/gateways/{id}/mcp-servers/{serverId}` 新增 `customDescription` 字段 | **自己写脚本调管理 API 的注意**：这是 PUT 全量语义，不传 = 清除覆盖，不是"不改" |
+| 管理接口响应里每个子 MCP 多 `originalDescription` / `customDescription` / `effectiveDescription` 三字段 | 纯增量，旧客户端忽略即可 |
+| 管理界面子 MCP 卡片多"描述"编辑器 | 无 |
+| 版本号 1.2.1 → 1.3.0 | jar 文件名跟着变。systemd 的 `ExecStart` 如果写死了版本号，要一起改 |
 
 ### 1.1 新增的环境变量
 
-| 变量 | 必填 | 默认 | 说明 |
-| --- | --- | --- | --- |
-| `MCP_GATEWAY_CONTEXT_PATH` | 否 | 空 | 子路径部署的前缀，如 `/kbmcp`。**必须与构建时的 `-Dvite.base.path` 同值**，且反代不要剥前缀 |
-
-原有的环境变量**一个都没有改动**，照抄即可。
-
-### 1.2 默认行为与 1.1.0 完全一致（已实测）
-
-不设 `MCP_GATEWAY_CONTEXT_PATH` 时，1.2.1 的 jar 实测结果：
-
-```
-/                 -> 302 /ui/gateways
-/ui/gateways      -> 200，入口文档里的资源地址是 /app/assets/...（无前缀）
-/api/gateways     -> 401（未登录）
-/actuator/health  -> 200
-Set-Cookie: XSRF-TOKEN=...; Path=/; SameSite=Strict
-```
-
-与升级前逐条相同。**不打算用子路径的话，这次升级对你来说只是换了个 jar。**
+**没有。** 原有的环境变量一个都没动，照抄即可。
 
 ---
 
-## 2. 升级前必须知道的三件事
+## 2. 升级前必须知道的事
 
 ### 2.1 必须先停后起，做不了蓝绿并行
 
 数据库连接串是 `jdbc:h2:file:...;AUTO_SERVER=FALSE`，**H2 文件库是独占锁**。新旧两个进程
 同时指向同一个数据文件，后起的那个会直接启动失败。
 
-所以升级只能是：停旧 → 起新。不要试图先起新实例再切流量。
+所以升级只能是：停旧 → 起新。不要试图先起新实例再切流量。这一条历次升级相同。
 
-这一条与上次升级相同，不是这次引入的。
+### 2.2 数据库迁移：一个，纯增量，自动执行
 
-### 2.2 Agent 平面连一行代码都没改
+`V3__downstream_mcp_description.sql` 就两条语句：
 
-`src/main/java/` 在这次升级里**零差异** —— 不是"改得少"，是 `git diff` 输出为空。
-唯一动过的服务端文件是 `application.yml`，加的是一个默认空值的配置项。
+```sql
+ALTER TABLE downstream_mcp ADD COLUMN original_description CLOB;
+ALTER TABLE downstream_mcp ADD COLUMN custom_description CLOB;
+```
 
-所以：
+- 两列都**可空**，存量行两列都是 `NULL` —— 效果是"这些子 MCP 没有描述"，组合 instructions
+  时跳过它们，与 1.2.1 的输出完全一致
+- 迁移在启动时由 Flyway 自动执行，**不需要手工跑任何 SQL**
+- 启动日志应出现 `Migrating schema "PUBLIC" to version "3"` 和 `Successfully applied 1 migration`
+- 新依赖：**没有**（前后端都没有）
+
+### 2.3 Agent 平面：不需要任何动作
 
 - **网关访问令牌继续有效**，不用轮换，不用通知 Agent 改配置
-- 令牌哈希方式、子 MCP 凭证的加密格式都没变，**不需要重新导入任何子 MCP**
-- 调用记录、工具快照都在原地
+- 子 MCP 凭证的加密格式、工具快照、调用记录全都在原地
+- 令牌错、路径、超时这些协议行为一概没动
 
-唯一的影响是重启期间那十几秒，Agent 的调用会失败。
+两个无害的可见变化：
 
-有一个无害的可见变化：MCP `initialize` 的响应里，服务端自报的 `version` 会从 `1.1.0`
-变成 `1.2.1`（取自 build-info）。协议行为不变。
+1. MCP `initialize` 响应里服务端自报的 `version` 会从 `1.2.1` 变成 `1.3.0`（取自 build-info）
+2. Agent **重连**后拿到的 `instructions` 文本可能变：网关描述之外会多出一段
+   `子 MCP：\n- <名>：<描述>`（只列有描述的子 MCP；一个都没有就只有网关描述）。
+   网关这边改描述后不会主动推送 —— 与工具变更一样，Agent 下一次 `initialize` 才看得到
 
-### 2.3 回滚没有任何代价
+### 2.4 回滚比上次多一步：数据库要连着一起回
 
-**这次没有数据库迁移**（`db/migration/` 下仍然只有 `V1` 和 `V2`，和升级前一样），
-所以不存在"新库配旧 jar"的问题 —— 上次升级要专门验证的那件事，这次根本不会发生。
+V3 会记进 `flyway_schema_history`。1.2.1 的 jar 里没有 V3 这个文件，启动时 Flyway 校验
+会发现"已应用但本地不存在"的迁移，**直接启动失败** —— 不是性能问题，是起不来。
 
-回滚就是把 jar 换回去，见 §5。
+所以这次回滚 = 换回旧 jar **＋恢复 §3.0 备份的数据库文件**，缺一不可。代价是升级之后
+才写入的描述（自定义的、捕获的）会跟着备份时点丢掉，其余数据也回到备份那一刻。
 
 ---
 
@@ -94,161 +91,71 @@ Set-Cookie: XSRF-TOKEN=...; Path=/; SameSite=Strict
 ### 3.0 先做的两件事
 
 ```bash
-# 一、备份数据库文件。这是唯一不可再生的东西
+# 一、备份数据库文件。这是唯一不可再生的东西，这次回滚也靠它
 sudo systemctl stop mcp-gateway          # 或你的停服方式
 cp -a /opt/mcp-gateway/data \
       /opt/mcp-gateway/data.bak-$(date +%Y%m%d)
 
 # 二、留一份当前 jar，回滚时要用
-cp /opt/mcp-gateway/mcp-gateway.jar /opt/mcp-gateway/mcp-gateway.jar.v1.1.0
+cp /opt/mcp-gateway/mcp-gateway.jar /opt/mcp-gateway/mcp-gateway.jar.v1.2.1
 ```
 
 > 库里含子 MCP 返回的正文（需求 FR-06.4），备份文件同样需要按部署要求保护。
 
-### 3.1 jar 部署（不挂子路径 —— 绝大多数情况）
+### 3.1 jar 部署
 
-**1. 在能联网的机器上构建**（不要在目标服务器上打包）
+**1. 在能联网的机器上构建**（不要在目标服务器上打包）：
 
 ```bash
 git fetch origin
-git checkout dev            # 确认在 26a0544 或更新
+git checkout dev            # 确认在版本号 1.3.0 的提交或更新
 git log -1 --format='%h %s'
 
 mvn -B clean package
-# 产物：target/mcp-gateway-1.2.1.jar
+# 产物：target/mcp-gateway-1.3.0.jar
 ```
 
-> **要挂子路径的别用这条命令** —— 它打出来的 jar 不带前缀，装上去是白屏。用 §3.2 那条。
+> 要挂子路径的照旧用 `mvn -Dvite.base.path=... -DskipTests -Dfrontend.test.skip=true clean package`，
+> 与上次相同的三处同步规则见 [DEPLOY.md](DEPLOY.md#挂在子路径下)。这次的功能与子路径无交互。
 
-> **依赖没有新增**，上次那两个新依赖（`spring-boot-starter-security`、`poi-ooxml`）已经在
-> 1.1.0 里了。前端构建仍需能访问 nodejs.org 和 npm registry。
-
-**2. 停掉旧实例**
+**2. 停掉旧实例**：
 
 ```bash
 sudo systemctl stop mcp-gateway
 ss -lntp | grep 8080        # 确认端口已释放，H2 的锁跟着进程走
 ```
 
-**3. 换 jar 并启动**
+**3. 换 jar 并启动**：
 
 ```bash
-cp target/mcp-gateway-1.2.1.jar /opt/mcp-gateway/mcp-gateway.jar
+cp target/mcp-gateway-1.3.0.jar /opt/mcp-gateway/mcp-gateway.jar
 sudo systemctl start mcp-gateway
 sudo journalctl -u mcp-gateway -f
 ```
 
-**环境变量一个都不用动。** 启动日志里应该看到 `Schema "PUBLIC" is up to date. No migration
-necessary.` —— 这次没有迁移，看到它才是对的。
+**环境变量一个都不用动。** 启动日志里应该看到 `Migrating schema "PUBLIC" to version "3"`、
+`Successfully applied 1 migration` —— 这次有迁移，看到它才是对的。
 
-> systemd 的 `ExecStart` 如果写的是 `mcp-gateway-1.1.0.jar` 这种带版本号的文件名，
+> systemd 的 `ExecStart` 如果写的是 `mcp-gateway-1.2.1.jar` 这种带版本号的文件名，
 > 记得一起改；写的是 `mcp-gateway.jar` 就不用动。
 
-### 3.2 要挂到子路径下（例如 `/kbmcp`）
+### 3.2 Docker Compose 部署
 
-**三处必须同时改，少一处就是坏的，而且坏法各不相同：**
-
-| 改哪里 | 怎么写 | 漏了的症状 |
-| --- | --- | --- |
-| 构建 | `mvn -Dvite.base.path=/kbmcp -DskipTests -Dfrontend.test.skip=true clean package` | 页面能打开但资源全 404（白屏），接口打到同域的别的应用上 |
-| 运行 | `MCP_GATEWAY_CONTEXT_PATH=/kbmcp` | 整个前缀 404 |
-| 反代 | 转发时**不要**剥掉前缀 | 剥两次等于没设，同样 404 |
-
-外加一个**不报错**的：`MCP_GATEWAY_BASE_URL` 要写到前缀为止
-（`https://host/kbmcp`），否则给 Agent 的接入 URL 会少一截 —— 管理界面一切正常，
-只有 Agent 连不上，而且不会有任何日志提示。
-
-**前缀是打进 jar 的。** 前端资源地址在 `index.html` 里是绝对路径，只能构建期确定，所以同一份
-产物不能既挂根路径又挂 `/kbmcp`；换前缀要重新构建，不是改个环境变量重启。
-
-打完先验产物再传 —— 漏了参数的 jar 照样能打出来、服务照样能起来、页面照样返回 200，
-只是白屏，一路到浏览器才发现：
-
-```bash
-unzip -p target/mcp-gateway-1.2.1.jar BOOT-INF/classes/static/app/index.html | grep -o 'src="[^"]*"'
-# 期望 src="/kbmcp/app/assets/index-xxxx.js"
-# 出现 src="/app/assets/..." 就是漏了 -Dvite.base.path，重打，别传
-```
-
-Nginx 的写法（`proxy_pass` 结尾**不带路径**，这正是"不剥前缀"的写法；一旦写成
-`proxy_pass http://127.0.0.1:8080/;` 就会把前缀剥掉）：
-
-```nginx
-location /kbmcp/ {
-    proxy_pass http://127.0.0.1:8080;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-
-    # /kbmcp/mcp/{slug} 是 Streamable HTTP，响应可能是长连 SSE。
-    # 缓冲开着的话事件会被 nginx 攒住不下发，Agent 看起来就是"卡住"。
-    proxy_buffering off;
-    proxy_cache off;
-    proxy_read_timeout 3600s;
-}
-
-# 不带尾斜杠的 /kbmcp 也能进去
-location = /kbmcp { return 301 /kbmcp/; }
-```
-
-顺带一个好处：会话 Cookie 和 CSRF 令牌 Cookie 的 `Path` 会自动收到 `/kbmcp` 上，
-与同域其他应用在 `/` 上种的同名 Cookie 不会互相覆盖。
-
-**从根路径改挂到子路径，等于换了地址。** 所有人的书签要更新；Agent 那边的接入 JSON
-要按新的 `BASE_URL` 重发一遍（令牌不变，只是 URL 变了）。
-
-详见 [DEPLOY.md](DEPLOY.md#挂在子路径下)。
-
-### 3.3 Docker Compose 部署
-
-`docker-compose.yml` 这次有一处结构改动：`build: .` 改成了长格式，多了 `args`。
-
-```yaml
-    build:
-      context: .
-      args:
-        VITE_BASE_PATH: ${MCP_GATEWAY_CONTEXT_PATH:-}
-    image: mcp-gateway:1.2.1
-```
-
-**自定义过 compose 文件的人要手工合并这一段**，直接用仓库里的新版覆盖会丢掉你的改动。
-不打算用子路径的话，这段照抄即可，空值等同于原来的行为。
-
-环境变量部分新增一行（同样默认空）：
-
-```yaml
-      MCP_GATEWAY_CONTEXT_PATH: ${MCP_GATEWAY_CONTEXT_PATH:-}
-```
-
-**一个变量同时喂给构建参数和运行环境**，所以构建期和运行期不可能对不上 —— §3.2 那张表里
-前两行的"少一处"在 compose 部署下不会发生。
+compose 文件这次**没有结构改动**，只有镜像 tag 从 `1.2.1` 变成 `1.3.0`。自定义过 compose
+文件的人只改 tag 一行即可。
 
 ```bash
 docker compose down
-docker compose build          # 依赖没变，这次不需要 --no-cache
+docker compose build          # 依赖没变，不需要 --no-cache
 docker compose up -d
-docker compose logs -f
+docker compose logs -f        # 同样应看到 V3 迁移 applied
 ```
-
-要挂子路径的话，先在 `.env` 里加一行再 build：
-
-```bash
-echo 'MCP_GATEWAY_CONTEXT_PATH=/kbmcp' >> .env
-echo 'MCP_GATEWAY_BASE_URL=https://host/kbmcp' >> .env   # 别忘了这条
-docker compose build && docker compose up -d
-```
-
-> 改了前缀**必须重新 `build`**，光 `up -d` 不会重打前端 —— 资源地址已经烤进镜像里了。
 
 数据在具名卷 `mcp-gateway-data` 里，`down` 不会删它（`down -v` 才会 —— **不要加 `-v`**）。
 
 ---
 
 ## 4. 升级后验证清单
-
-不挂子路径的走 ①～④，挂了子路径的把地址都加上前缀再走一遍，并补上 ⑤。
 
 **① 服务活着**
 
@@ -257,21 +164,23 @@ curl -s http://127.0.0.1:8080/actuator/health
 # 期望 {"status":"UP"}
 ```
 
-**② 换上去的确实是 1.2.1**
+**② 换上去的确实是 1.3.0**
 
 jar 里的 `build-info` 就是版本号的唯一来源（`GatewayVersion` 读的也是它）：
 
 ```bash
 unzip -p /opt/mcp-gateway/mcp-gateway.jar META-INF/build-info.properties | grep version
-# 期望 build.version=1.2.1
+# 期望 build.version=1.3.0
 ```
 
 看文件名不算数 —— 复制的时候改个名就对不上了。
 
 **③ 界面和数据都在**
 
-浏览器打开 `{baseUrl}/`，落到登录页，登录后网关列表条数与升级前一致；随便点一个进详情页，
-子 MCP 和聚合工具都在，**headers 显示为遮罩值 `******`**（说明凭证解密正常）。
+浏览器打开 `{baseUrl}/`，登录后网关列表条数与升级前一致；随便点一个进详情页，子 MCP
+和聚合工具都在，**headers 显示为遮罩值 `******`**（说明凭证解密正常）。子 MCP 卡片里
+多出一栏**描述**：上面一行"原始"（升级后是空的，点一次「测试并同步」就会捕获下游自述），
+下面是自定义描述输入框 —— 这就是新功能落地了的直接证据。
 
 **④ Agent 还能用（最关键的一条）**
 
@@ -285,82 +194,62 @@ curl -s -X POST 'http://127.0.0.1:8080/mcp/<你的slug>' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-期望正常返回工具列表。
-
-**⑤ 子路径部署要额外查两半**
-
-前缀内通、前缀外不通，**两半都要看**。只看前一半的话，"前缀没生效、应用还占着根路径"
-这种情况是发现不了的：
-
-```bash
-curl -sI http://127.0.0.1:8080/kbmcp/ui/gateways | head -1   # 期望 200
-curl -sI http://127.0.0.1:8080/ui/gateways       | head -1   # 期望 404
-
-# 入口文档里的资源地址必须带着前缀，否则就是构建时漏了 -Dvite.base.path
-curl -s http://127.0.0.1:8080/kbmcp/ui/gateways | grep -o 'src="[^"]*"'
-# 期望形如 src="/kbmcp/app/assets/index-xxxx.js"
-```
-
-再到管理界面上打开任意一个网关的详情页，确认**接入 JSON 里的 URL 带着前缀**
-（`https://host/kbmcp/mcp/<slug>`）。不带前缀就是 `MCP_GATEWAY_BASE_URL` 没改 ——
-这是唯一一个不会报错、只有 Agent 那边能发现的坑。
+期望正常返回工具列表，内容与升级前一致。想顺便看新行为，把 `method` 换成 `initialize`
+（params 照 MCP 规范带 `protocolVersion` / `capabilities` / `clientInfo`），返回的
+`instructions` 就是组合后的文案。
 
 ---
 
 ## 5. 回滚
 
-没有数据库迁移要退，回滚就是把 jar 换回去。
+**先停服，再把两样都换回去**（只换 jar 不还原库，旧 jar 起不来，见 §2.4）：
 
 ```bash
 sudo systemctl stop mcp-gateway
-cp /opt/mcp-gateway/mcp-gateway.jar.v1.1.0 /opt/mcp-gateway/mcp-gateway.jar
+rm -rf /opt/mcp-gateway/data
+cp -a /opt/mcp-gateway/data.bak-$(date +%Y%m%d) /opt/mcp-gateway/data
+cp /opt/mcp-gateway/mcp-gateway.jar.v1.2.1 /opt/mcp-gateway/mcp-gateway.jar
 sudo systemctl start mcp-gateway
 ```
 
-Docker：`docker compose down && git checkout <上一个提交> && docker compose build && docker compose up -d`
+Docker 的数据在具名卷里，多一步把备份放回卷：
 
-**环境变量不用删** —— 旧版本不认识 `MCP_GATEWAY_CONTEXT_PATH`，多设一个不影响它启动
-（Spring Boot 只是忽略掉没人读的环境变量）。
+```bash
+docker compose down
+# 把备份的 .mv.db 放回卷（示例用 alpine 临时容器）
+docker run --rm -v mcp-gateway-data:/data -v "$PWD":/backup alpine \
+  sh -c 'rm -f /data/*.mv.db* && cp /backup/data.bak-*/mcp-gateway.* /data/'
+git checkout <1.2.1 对应的提交>
+docker compose build && docker compose up -d
+```
 
-**但如果你已经挂上了子路径，回滚就等于把地址改回根路径**：1.1.0 的 jar 不认 context-path，
-应用会重新占据 `/ui` `/api` `/app` `/mcp`。此时必须同步做两件事：
-
-1. 把 Nginx 的 `location /kbmcp/` 改回去（或直接删掉），否则前缀下是 404
-2. 把 `MCP_GATEWAY_BASE_URL` 去掉前缀，并通知 Agent 换回不带前缀的 URL
-
-换句话说：**不挂子路径时回滚零成本；挂了子路径之后回滚要连带回退反代和接入地址。**
-这是决定要不要用子路径时就该知道的事，不是回滚当天才发现的。
+升级期间新产生的调用记录和描述会随回滚丢掉 —— 备份是升级前那一刻的快照，这是代价本身。
 
 ---
 
 ## 6. 常见问题
 
-**子路径下页面白屏，控制台一堆资源 404**
-构建时漏了 `-Dvite.base.path`，或者它与 `MCP_GATEWAY_CONTEXT_PATH` 不是同一个值。
-看一眼入口文档就知道：`curl -s {baseUrl}/kbmcp/ui/gateways | grep -o 'src="[^"]*"'`，
-地址里没有前缀就是这个问题。重新构建，别指望改环境变量能救。
+**重连后 Agent 拿到的 instructions 变了，是坏了吗**
+是预期变化：instructions 改成"网关描述 + 子 MCP 清单"的组合式。只动文案，工具列表、
+令牌、协议行为都不受影响。不想要子 MCP 清单，把子 MCP 的自定义描述清空、且别触发
+重新同步（捕获为空就不列）。
 
-**子路径下整个前缀 404**
-两种可能：运行时没设 `MCP_GATEWAY_CONTEXT_PATH`；或者反代把前缀剥掉了 ——
-`proxy_pass` 结尾带了路径（`http://127.0.0.1:8080/`）就会剥，去掉那个斜杠。
+**自己写的脚本编辑子 MCP 之后，自定义描述总是丢**
+`PUT` 的 `customDescription` 是**全量语义**：不传、`null`、空白都表示清除覆盖。脚本
+每次都要显式带上这个字段，没有"不传 = 不改"（与 `headers` 的三态、工具 PATCH 的三态
+都不同，详见 USAGE.md §5.2）。
 
-**管理界面一切正常，但 Agent 连不上**
-`MCP_GATEWAY_BASE_URL` 没跟着改。它是**唯一不会报错**的一处：接入 JSON 里的地址
-刻意不从 `Host` / `X-Forwarded-*` 推断（需求 FR-05.1），所以只能靠配置，配错了没人拦。
+**怎么让"原始"那行有内容**
+点详情页里的「测试并同步」：网关连一次下游，把下游 `initialize` 的 `instructions`
+捕获下来。下游没报过 instructions 就一直是空的，这是正常状态。
 
-**子路径下登录后一刷新就退回登录页**
-先查 `MCP_GATEWAY_COOKIE_SECURE`（TLS 反代后面要 `true`）。与前缀无关 ——
-Cookie 的 `Path` 会自动收到前缀上，不需要手工配。
+**回滚后旧 jar 起不来，日志有 `applied migration not resolved locally`**
+数据库没有跟着回。按 §5 把备份的库一起还原 —— Flyway 校验到"已应用但 jar 里不存在"
+的 V3 会拒绝启动，这是刻意的防呆，不是故障。
 
-**Docker 改了 `.env` 里的前缀但没生效**
-只 `up -d` 不够，前端资源地址烤在镜像里，必须 `docker compose build`。
-
-**`docker compose up` 报 `build` 格式错误**
-compose 文件只合并了一半 —— `build: .` 和 `build:` 长格式不能共存，照 §3.3 整段替换。
-
-**升级后调用记录页的列变回默认了**
-列配置存在**浏览器本地**（localStorage）、按网关区分。这次升级不动它；但如果你**改了前缀**，
-浏览器眼里那是另一个源，本地存的列配置和主题偏好都要重设一次。
+**只改了子 MCP 的描述，怎么没触发重新同步**
+就是这样设计的：描述来自网关本地（捕获值或人工覆盖），不来自下游的工具目录，改它
+不需要去摸下游。`PUT` 响应里 `syncResult` 为 `null` 即"这次没同步"。
 
 ---
 
@@ -368,10 +257,11 @@ compose 文件只合并了一半 —— `build: .` 和 `build:` 长格式不能�
 
 写在这里是为了省掉不必要的动作：
 
-- **不需要**新增任何环境变量（除非要挂子路径）
+- **不需要**新增或修改任何环境变量
 - **不需要**轮换网关访问令牌
 - **不需要**重新导入或重新配置任何子 MCP
 - **不需要**改 `MCP_GATEWAY_MASTER_KEY`
-- **不需要**执行任何 SQL —— 这次一个迁移都没有
-- **不需要**清缓存、清 localStorage（不改前缀的话）
-- **不需要**改 Nginx / 反代配置（不改前缀的话，路径和端口都没变）
+- **不需要**执行任何 SQL —— V3 迁移启动时自动跑
+- **不需要**改 Nginx / 反代配置
+- **不需要**清缓存、清 localStorage
+- **不需要**通知 Agent 做任何事（它们重连后自然拿到新 instructions）
