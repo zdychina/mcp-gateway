@@ -4,6 +4,7 @@ import com.mcpgateway.domain.DownstreamMcp;
 import com.mcpgateway.domain.SyncStatus;
 import com.mcpgateway.error.ErrorCode;
 import com.mcpgateway.error.GatewayException;
+import com.mcpgateway.mcpserver.GatewayMcpRegistry;
 import com.mcpgateway.repository.DownstreamMcpRepository;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.slf4j.Logger;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * 连接测试与工具同步（需求 6.2.7 / 6.2.8 / 6.4）。
@@ -33,12 +35,16 @@ public class ToolSyncService {
 
     private final ToolSnapshotWriter snapshotWriter;
 
+    private final GatewayMcpRegistry mcpRegistry;
+
     public ToolSyncService(DownstreamMcpRepository downstreams, DownstreamClientFactory clientFactory,
-            ToolDefinitionMapper definitionMapper, ToolSnapshotWriter snapshotWriter) {
+            ToolDefinitionMapper definitionMapper, ToolSnapshotWriter snapshotWriter,
+            GatewayMcpRegistry mcpRegistry) {
         this.downstreams = downstreams;
         this.clientFactory = clientFactory;
         this.definitionMapper = definitionMapper;
         this.snapshotWriter = snapshotWriter;
+        this.mcpRegistry = mcpRegistry;
     }
 
     /**
@@ -59,9 +65,12 @@ public class ToolSyncService {
         }
 
         List<FetchedTool> fetched;
+        String capturedInstructions;
         try {
             // 网络往返在事务之外。
-            fetched = fetchTools(downstream);
+            SyncFetch syncFetch = fetchTools(downstream);
+            fetched = syncFetch.tools();
+            capturedInstructions = syncFetch.instructions();
         }
         catch (GatewayException ex) {
             return markFailed(downstream, ex);
@@ -74,7 +83,13 @@ public class ToolSyncService {
         Instant now = Instant.now();
         try {
             ToolSnapshotWriter.SyncOutcome outcome = this.snapshotWriter.merge(downstream, fetched, now);
-            this.downstreams.updateSyncResult(downstream.id(), SyncStatus.SUCCESS, now, null, now);
+            this.downstreams.updateSyncResult(downstream.id(), SyncStatus.SUCCESS, now, null,
+                    capturedInstructions, now);
+            // 捕获的原始描述进入了 Agent instructions 的组合，变化时要失效缓存，
+            // 让下一次 initialize 拿到新文案。没有变化的重新同步不打扰缓存。
+            if (!Objects.equals(capturedInstructions, downstream.originalDescription())) {
+                this.mcpRegistry.evict(downstream.gatewayId());
+            }
             return SyncReport.success(downstream.id(), downstream.name(), outcome);
         }
         catch (GatewayException ex) {
@@ -84,7 +99,11 @@ public class ToolSyncService {
         }
     }
 
-    private List<FetchedTool> fetchTools(DownstreamMcp downstream) {
+    /**
+     * 一次网络往返同时取两样东西：工具清单和下游 initialize 握手返回的 instructions。
+     * instructions 是下游 MCP 的"自述"，作为子 MCP 的原始描述落库；下游没发就是 null，原样保存。
+     */
+    private SyncFetch fetchTools(DownstreamMcp downstream) {
         return this.clientFactory.withClient(downstream, client -> {
             McpSchema.ListToolsResult result;
             try {
@@ -93,8 +112,13 @@ public class ToolSyncService {
             catch (RuntimeException ex) {
                 throw DownstreamErrorMapper.map(ex, ErrorCode.DOWNSTREAM_SYNC_FAILED, downstream.name());
             }
-            return this.definitionMapper.toFetchedTools(result.tools(), downstream.name());
+            return new SyncFetch(this.definitionMapper.toFetchedTools(result.tools(), downstream.name()),
+                    client.getServerInstructions());
         });
+    }
+
+    /** 同步一次从下游拿到的全部内容。 */
+    private record SyncFetch(List<FetchedTool> tools, String instructions) {
     }
 
     /**
@@ -103,8 +127,9 @@ public class ToolSyncService {
      */
     private SyncReport markFailed(DownstreamMcp downstream, GatewayException failure) {
         String errorSummary = failure.errorCode().name() + ": " + failure.getMessage();
+        // originalDescription 传读到的旧值：失败保留上一次的捕获，与工具快照同款语义。
         this.downstreams.updateSyncResult(downstream.id(), SyncStatus.FAILED,
-                downstream.lastSyncAt(), truncate(errorSummary), Instant.now());
+                downstream.lastSyncAt(), truncate(errorSummary), downstream.originalDescription(), Instant.now());
         log.warn("sync failed for downstream [{}]: {}", downstream.name(), errorSummary, failure);
         return SyncReport.failure(downstream.id(), downstream.name(), failure.errorCode(), errorSummary);
     }

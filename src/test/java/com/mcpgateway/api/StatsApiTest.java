@@ -93,7 +93,7 @@ class StatsApiTest extends AbstractApiTest {
     private String seedDownstream(String owner, String name) {
         DownstreamMcp downstream = new DownstreamMcp(UUID.randomUUID().toString(), owner, name,
                 DownstreamMcp.TYPE_STREAMABLE_HTTP, "https://kb.example.com/mcp", null,
-                SyncStatus.SUCCESS, NOW, null, NOW, NOW);
+                null, null, SyncStatus.SUCCESS, NOW, null, NOW, NOW);
         this.downstreams.insert(downstream);
         return downstream.id();
     }

@@ -2,6 +2,7 @@ package com.mcpgateway.mcpserver;
 
 import com.mcpgateway.TestAdminCredentials;
 import com.mcpgateway.TestMasterKey;
+import com.mcpgateway.api.dto.UpdateDownstreamRequest;
 import com.mcpgateway.domain.DownstreamMcp;
 import com.mcpgateway.domain.Gateway;
 import com.mcpgateway.domain.GatewayTool;
@@ -14,6 +15,7 @@ import com.mcpgateway.repository.GatewayRepository;
 import com.mcpgateway.repository.GatewayToolRepository;
 import com.mcpgateway.security.AccessTokenService;
 import com.mcpgateway.security.DownstreamHeaderCodec;
+import com.mcpgateway.service.DownstreamMcpService;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
@@ -78,6 +80,9 @@ class AgentEndToEndTest {
     private ToolSyncService syncService;
 
     @Autowired
+    private DownstreamMcpService downstreamService;
+
+    @Autowired
     private DownstreamHeaderCodec headerCodec;
 
     @Autowired
@@ -129,7 +134,7 @@ class AgentEndToEndTest {
     private DownstreamMcp addDownstream(String name, String path) {
         DownstreamMcp downstream = new DownstreamMcp(UUID.randomUUID().toString(), this.gateway.id(), name,
                 DownstreamMcp.TYPE_STREAMABLE_HTTP, "http://localhost:" + this.port + path,
-                this.headerCodec.encrypt(Map.of()), SyncStatus.PENDING, null, null,
+                this.headerCodec.encrypt(Map.of()), null, null, SyncStatus.PENDING, null, null,
                 Instant.now(), Instant.now());
         this.downstreams.insert(downstream);
         assertThat(this.syncService.sync(downstream.id()).succeeded()).isTrue();
@@ -193,6 +198,33 @@ class AgentEndToEndTest {
         addDownstream("kb_a", MockDownstreamConfig.KB_A_PATH);
 
         assertThat(connectedAgent().getServerInstructions()).isEqualTo("网关用途说明");
+    }
+
+    @Test
+    @DisplayName("instructions 由网关描述与有描述的子 MCP 组合，捕获的原始描述直接出现")
+    void instructionsComposeGatewayAndDownstreamDescriptions() {
+        addDownstream("kb_a", MockDownstreamConfig.KB_A_PATH);
+        addDownstream("kb_b", MockDownstreamConfig.KB_B_PATH);
+
+        // kb_a 没有自述，不进清单；kb_b 的自述是同步时捕获的原始描述
+        assertThat(connectedAgent().getServerInstructions())
+                .isEqualTo("网关用途说明\n\n子 MCP：\n- kb_b：mock instructions of kbB");
+    }
+
+    @Test
+    @DisplayName("改子 MCP 自定义描述后重连 Agent，看到新的 instructions")
+    void customDownstreamDescriptionReachesAgentsAfterReconnect() {
+        DownstreamMcp kbB = addDownstream("kb_b", MockDownstreamConfig.KB_B_PATH);
+        assertThat(connectedAgent().getServerInstructions())
+                .contains("kb_b：mock instructions of kbB");
+
+        // 只改自定义描述，不改地址：不该触发重新同步，但 instructions 要失效重建
+        boolean needsResync = this.downstreamService.update(this.gateway.id(), kbB.id(),
+                new UpdateDownstreamRequest("kb_b", kbB.url(), null, "运营改写"));
+        assertThat(needsResync).isFalse();
+
+        assertThat(connectedAgent().getServerInstructions())
+                .isEqualTo("网关用途说明\n\n子 MCP：\n- kb_b：运营改写");
     }
 
     @Test
@@ -334,7 +366,7 @@ class AgentEndToEndTest {
         addDownstream("kb_a", MockDownstreamConfig.KB_A_PATH);
         DownstreamMcp broken = addDownstream("kb_b", MockDownstreamConfig.KB_B_PATH);
         // 同步成功之后下游才挂掉：快照仍在，但调用会失败
-        this.downstreams.updateConfig(broken.id(), "kb_b", "http://localhost:1/mcp", null, Instant.now());
+        this.downstreams.updateConfig(broken.id(), "kb_b", "http://localhost:1/mcp", null, null, Instant.now());
 
         McpSyncClient agent = connectedAgent();
         assertThat(namesOf(agent.listTools()))
@@ -355,7 +387,7 @@ class AgentEndToEndTest {
     void downstreamFailuresAreSanitised() {
         DownstreamMcp downstream = addDownstream("kb_a", MockDownstreamConfig.KB_A_PATH);
         this.downstreams.updateConfig(downstream.id(), "kb_a", "http://10.1.2.3:9999/mcp",
-                this.headerCodec.encrypt(Map.of("Authorization", "Bearer sk-secret-value")), Instant.now());
+                this.headerCodec.encrypt(Map.of("Authorization", "Bearer sk-secret-value")), null, Instant.now());
         McpSyncClient agent = connectedAgent();
 
         assertThatThrownBy(() -> agent.callTool(

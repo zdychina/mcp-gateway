@@ -16,7 +16,7 @@ class GatewayStatusCalculatorTest {
 
     private static DownstreamMcp with(SyncStatus status) {
         return new DownstreamMcp("id", "gw", "kb", DownstreamMcp.TYPE_STREAMABLE_HTTP,
-                "https://example.com/mcp", null, status, null, null, Instant.EPOCH, Instant.EPOCH);
+                "https://example.com/mcp", null, null, null, status, null, null, Instant.EPOCH, Instant.EPOCH);
     }
 
     @Test

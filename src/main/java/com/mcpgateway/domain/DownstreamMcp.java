@@ -15,6 +15,8 @@ public record DownstreamMcp(
         String type,
         String url,
         String encryptedHeadersJson,
+        String originalDescription,
+        String customDescription,
         SyncStatus syncStatus,
         Instant lastSyncAt,
         String lastSyncError,
@@ -33,5 +35,16 @@ public record DownstreamMcp(
 
     public static boolean containsDoubleUnderscore(String name) {
         return name != null && name.contains("__");
+    }
+
+    /**
+     * 自定义描述非空时完全替换原始描述；为空时回退使用原始描述。
+     * 与 {@code GatewayTool.effectiveDescription()} 同款语义，是子 MCP
+     * "生效描述"的唯一计算入口，前端展示和 Agent instructions 组合都必须走它。
+     */
+    public String effectiveDescription() {
+        return (this.customDescription == null || this.customDescription.isBlank())
+                ? this.originalDescription
+                : this.customDescription;
     }
 }

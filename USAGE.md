@@ -248,9 +248,10 @@ curl -X POST http://127.0.0.1:8080/mcp/kb \
 | --- | --- | --- |
 | 网关 name | 非空，≤ 64 字符 | `INVALID_REQUEST` |
 | 网关 slug | `^[A-Za-z0-9_-]{1,64}$`，全局唯一 | `INVALID_REQUEST` / `DUPLICATE_GATEWAY_SLUG` |
-| 网关 description | ≤ 4000 字符，会成为 MCP `initialize` 的 `instructions` | `INVALID_REQUEST` |
+| 网关 description | ≤ 4000 字符，会并入 MCP `initialize` 的 `instructions`（见 [§6.2](#62-网关接管了什么)） | `INVALID_REQUEST` |
 | 子 MCP name | `^[A-Za-z0-9_.-]{1,64}$`，**不得含 `__`**，网关内唯一 | `INVALID_MCP_CONFIG` / `DUPLICATE_DOWNSTREAM_NAME` |
 | 子 MCP url | 绝对 URL，仅 http/https，**不得含 user-info**，≤ 2048 字符 | `INVALID_MCP_CONFIG` |
+| 子 MCP 描述（自定义） | ≤ 4000 字符，非空时覆盖同步捕获的原始描述，并并入 `instructions` | `INVALID_REQUEST` |
 | 聚合工具名 | `子MCP名称__原工具名`，须匹配 `^[A-Za-z0-9_.-]{1,128}$` | `INVALID_TOOL_NAME`，整次同步失败 |
 
 `__` 是聚合命名的分隔符，所以子 MCP 名字里不能再出现它，否则聚合名读不回原始结构。
@@ -358,7 +359,10 @@ MCP 地址那一列带复制按钮 —— 配 Agent 时要的就是这个地址�
 **基本信息** —— 改名称、slug、描述。
 改 slug 会改变 Agent 侧的 MCP URL，是**破坏性变更**，已接入的 Agent 会连不上。
 
-**子 MCP 配置** —— 导入、编辑、删除、单个「测试并同步」。
+**子 MCP 配置** —— 导入、编辑、删除、单个「测试并同步」。编辑表单里有一项**描述**：
+上面一行「原始」是同步时从下游 `initialize` 自动捕获的说明（只读，下游没提供会注明）；
+下面的输入框是自定义描述，留空保存表示清除、回退原始描述。描述会并入总 MCP 的
+`instructions` 传给 Agent（见 [§6.2](#62-网关接管了什么)），只改描述不会触发重新同步。
 
 编辑子 MCP 时页面显示的 headers 是遮罩值 `******`。**必须先勾「替换 headers」** 才会提交这个字段；不勾则不提交，服务端保持原有凭证不变。把遮罩值原样提交回去会把真凭证覆盖掉。
 
@@ -581,7 +585,7 @@ curl http://127.0.0.1:8080/api/gateways
 #### `PUT /api/gateways/{id}/mcp-servers/{serverId}` — 编辑
 
 ```json
-{ "name": "wiki", "url": "https://wiki.internal.example.com/mcp" }
+{ "name": "wiki", "url": "https://wiki.internal.example.com/mcp", "customDescription": "内部知识库检索" }
 ```
 
 **`headers` 字段有三种语义，务必分清：**
@@ -594,11 +598,28 @@ curl http://127.0.0.1:8080/api/gateways
 
 绝不要把 `GET` 拿到的遮罩值 `******` 原样提交回来 —— 那会把真凭证覆盖成字面的 `******`。
 
+**`customDescription` 是 PUT 全量语义，与 `headers` 的三态不同：**
+
+| 提交内容 | 效果 |
+| --- | --- |
+| 不传 / `null` / 空白 | **清除**覆盖，回退到同步捕获的原始描述 |
+| `"customDescription": "..."` | 覆盖生效，会并入 Agent `instructions` |
+
+调用方每次都应显式提交这个字段 —— 漏传即清除，不存在"不传 = 不改"。
+
+子 MCP 有两个描述字段（与工具快照同构）：
+
+- `originalDescription`：同步时从下游 MCP `initialize` 返回的 `instructions` **自动捕获**，只读，
+  不能通过 API 修改；同步失败时保留上一次的捕获（需求 6.4.7 同款语义）
+- `customDescription`：操作人的覆盖描述，就是上面 PUT 的字段
+- `effectiveDescription`：生效值 —— 自定义非空时用它，否则回退原始
+
 改名会连带改掉**所有**聚合工具名，对 Agent 是破坏性变更（启停状态和自定义描述会保留）。
 
 **改了 `url` 或 `headers` 会自动重新同步一次工具快照**：那两样一变，下游能给出的工具集
 本来就可能不一样，不重新拉的话页面上一切正常、快照却还是旧那套，直到 Agent 调用一个
-已经不存在的工具才暴露。只改 `name` 不会同步 —— 聚合工具名是本地按新名字重算的。
+已经不存在的工具才暴露。只改 `name` 或描述**不会**同步 —— 聚合工具名是本地按新名字
+重算的，描述也不来自下游。
 
 响应与导入接口同形：配置一定落库，同步单独报成败（需求 6.2.9）。
 
@@ -866,9 +887,23 @@ Accept: application/json, text/event-stream
 | `tools/call` | **网关**，按聚合名路由到子 MCP，全程打点 |
 | `initialize` / `ping` / 其他 | 官方 SDK 原样处理 |
 
-`initialize` 返回的 `instructions` 就是网关的**描述**字段。
+`initialize` 返回的 `instructions` 是**组合**出来的，不只来自网关描述：
 
-网关的 SDK server **不注册任何工具** —— 工具目录由网关自己每次从数据库读，所以启停、重新同步、改描述都立即生效，不需要重建 MCP 上下文。
+```
+<网关描述>
+
+子 MCP：
+- <子MCP名>：<生效描述>
+```
+
+- 子 MCP 的生效描述 = 自定义描述非空时用它，否则回退同步捕获的原始描述
+  （下游自己 `initialize` 返回的 `instructions`，见 [§5.2](#52-子-mcp)）
+- 只列出**有**生效描述的子 MCP；没有网关描述、也没有任何有描述的子 MCP 时，`instructions` 为空
+
+网关的 SDK server **不注册任何工具** —— 工具目录由网关自己每次从数据库读，所以启停、
+重新同步都立即生效，不需要重建 MCP 上下文。`instructions` 是例外：它在连接建立时定死。
+网关描述、子 MCP 名称或描述（含同步捕获的原始描述）变化后，网关会丢弃缓存的 MCP
+上下文并用新文案重建，但**已连接的 Agent 必须重连**（重新 `initialize`）才能拿到。
 
 > **"立即生效"是服务端视角。** 网关不发 `notifications/tools/list_changed` ——
 > 无状态的 streamable-http 下没有可以往回推的长连接，而按需求 16.1 这里也不该长成一套

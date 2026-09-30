@@ -46,7 +46,7 @@ class GatewayToolApiTest extends AbstractApiTest {
 
         DownstreamMcp downstream = new DownstreamMcp(UUID.randomUUID().toString(), this.gatewayId, "kb_a",
                 DownstreamMcp.TYPE_STREAMABLE_HTTP, "http://127.0.0.1:1/mcp", null,
-                SyncStatus.SUCCESS, Instant.now(), null, Instant.now(), Instant.now());
+                null, null, SyncStatus.SUCCESS, Instant.now(), null, Instant.now(), Instant.now());
         this.downstreams.insert(downstream);
 
         Instant now = Instant.now();

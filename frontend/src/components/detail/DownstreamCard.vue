@@ -14,7 +14,7 @@ const emit = defineEmits<{ replaced: [GatewayDetail], reload: [] }>()
 const alerts = useAlerts()
 const busy = ref(false)
 
-const form = ref({ name: '', url: '' })
+const form = ref({ name: '', url: '', customDescription: '' })
 /*
  * 需求 12.4：页面上的 headers 是遮罩值 ******，真凭证不回传前端。
  * 所以默认**不提交** headers 字段 —— 把遮罩值原样交回去会把真凭证覆盖掉。
@@ -24,7 +24,11 @@ const replaceHeaders = ref(false)
 const headersJson = ref('')
 
 watch(() => props.downstream, downstream => {
-  form.value = { name: downstream.name, url: downstream.url }
+  form.value = {
+    name: downstream.name,
+    url: downstream.url,
+    customDescription: downstream.customDescription ?? '',
+  }
   replaceHeaders.value = false
   headersJson.value = ''
 }, { immediate: true })
@@ -43,7 +47,16 @@ async function save(): Promise<void> {
     return
   }
 
-  const request: UpdateDownstreamRequest = { name, url: form.value.url.trim() }
+  /*
+   * customDescription 是 PUT 全量语义，与 headers 的三态不同：每次都显式提交，
+   * 空白即清除、回退到同步捕获的原始描述（见 UpdateDownstreamRequest 的说明）。
+   */
+  const customDescription = form.value.customDescription.trim()
+  const request: UpdateDownstreamRequest = {
+    name,
+    url: form.value.url.trim(),
+    customDescription: customDescription === '' ? null : customDescription,
+  }
 
   if (replaceHeaders.value) {
     const raw = headersJson.value.trim()
@@ -186,6 +199,20 @@ async function remove(): Promise<void> {
           <label :for="`ds-url-${downstream.id}`">URL</label>
           <input :id="`ds-url-${downstream.id}`" v-model="form.url" class="control mono" required>
           <span class="hint">改了地址或凭证会自动重新同步一次工具。</span>
+        </div>
+
+        <div class="field span-all">
+          <label :for="`ds-desc-${downstream.id}`">描述</label>
+          <!-- 编辑时把捕获的原始描述亮出来做参照：覆盖之前总得看得见自己在覆盖什么 -->
+          <p class="origin-desc" :title="downstream.originalDescription ?? ''">
+            <span class="label">原始</span>
+            <span v-if="downstream.originalDescription">{{ downstream.originalDescription }}</span>
+            <span v-else class="subtle">下游未提供说明（同步时自动捕获）</span>
+          </p>
+          <textarea :id="`ds-desc-${downstream.id}`" v-model="form.customDescription"
+                    class="control" rows="2" maxlength="4000"
+                    placeholder="自定义描述，留空则回退到下游原始描述"></textarea>
+          <span class="hint">描述会并入总 MCP 的 instructions 传给 Agent；只改描述不会触发重新同步。</span>
         </div>
 
         <div class="field span-all">

@@ -242,6 +242,58 @@ class DownstreamMcpApiTest extends AbstractApiTest {
     }
 
     @Test
+    @DisplayName("编辑自定义描述随 PUT 落库并回显，空白清除后回退原始描述")
+    void customDescriptionRoundTrip() throws Exception {
+        String gatewayId = createGateway();
+        importServers(gatewayId, TWO_SERVERS);
+        DownstreamMcp kbA = this.downstreams.findByGatewayId(gatewayId).stream()
+                .filter(d -> d.name().equals("kb_a")).findFirst().orElseThrow();
+
+        // 模拟一次成功同步捕获到的原始描述
+        Instant now = Instant.now();
+        this.downstreams.updateSyncResult(kbA.id(),
+                com.mcpgateway.domain.SyncStatus.SUCCESS, now, null, "下游自述：知识库检索", now);
+
+        this.mockMvc.perform(put("/api/gateways/{id}/mcp-servers/{serverId}", gatewayId, kbA.id())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"kb_a\",\"url\":\"http://127.0.0.1:1/a/mcp\","
+                        + "\"customDescription\":\"运营改写\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.gateway.downstreams[0].originalDescription")
+                        .value("下游自述：知识库检索"))
+                .andExpect(jsonPath("$.data.gateway.downstreams[0].customDescription").value("运营改写"))
+                .andExpect(jsonPath("$.data.gateway.downstreams[0].effectiveDescription").value("运营改写"));
+
+        // PUT 全量语义：空白即清除，生效描述回退到捕获的原始描述
+        this.mockMvc.perform(put("/api/gateways/{id}/mcp-servers/{serverId}", gatewayId, kbA.id())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"kb_a\",\"url\":\"http://127.0.0.1:1/a/mcp\",\"customDescription\":\" \"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.gateway.downstreams[0].customDescription")
+                        .value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.data.gateway.downstreams[0].effectiveDescription")
+                        .value("下游自述：知识库检索"));
+    }
+
+    @Test
+    @DisplayName("自定义描述超过 4000 字符返回 INVALID_REQUEST")
+    void customDescriptionLengthIsCapped() throws Exception {
+        String gatewayId = createGateway();
+        importServers(gatewayId, TWO_SERVERS);
+        DownstreamMcp kbA = this.downstreams.findByGatewayId(gatewayId).stream()
+                .filter(d -> d.name().equals("kb_a")).findFirst().orElseThrow();
+
+        this.mockMvc.perform(put("/api/gateways/{id}/mcp-servers/{serverId}", gatewayId, kbA.id())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(this.objectMapper.writeValueAsString(java.util.Map.of(
+                        "name", "kb_a",
+                        "url", "http://127.0.0.1:1/a/mcp",
+                        "customDescription", "x".repeat(4001)))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_REQUEST"));
+    }
+
+    @Test
     @DisplayName("需求 12.7：编辑时同样校验 URL 协议与 user-info")
     void validatesUrlOnUpdate() throws Exception {
         String gatewayId = createGateway();

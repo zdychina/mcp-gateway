@@ -19,14 +19,19 @@ public class MockDownstreamConfig {
 
     public static final String KB_B_PATH = "/mock-downstream/kb-b";
 
+    /** kb_b 的固定自述：同步捕获测试用它断言 original_description。 */
+    public static final String KB_B_INSTRUCTIONS = "mock instructions of kbB";
+
     @Bean
     public MockDownstreamMcpServer mockKbA() {
+        // kb_a 保持没有 instructions：AgentEndToEndTest 有用例断言 instructions 只剩网关描述。
         return new MockDownstreamMcpServer("kbA", KB_A_PATH, List.of("search", "ping"));
     }
 
     @Bean
     public MockDownstreamMcpServer mockKbB() {
-        return new MockDownstreamMcpServer("kbB", KB_B_PATH, List.of("search", "lookup"));
+        return new MockDownstreamMcpServer("kbB", KB_B_PATH, List.of("search", "lookup"),
+                KB_B_INSTRUCTIONS);
     }
 
     @Bean

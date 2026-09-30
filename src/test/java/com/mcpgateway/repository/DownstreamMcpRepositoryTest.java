@@ -52,11 +52,11 @@ class DownstreamMcpRepositoryTest extends AbstractDataTest {
         this.downstreams.insert(downstream);
 
         Instant syncedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
-        this.downstreams.updateSyncResult(downstream.id(), SyncStatus.SUCCESS, syncedAt, null, syncedAt);
+        this.downstreams.updateSyncResult(downstream.id(), SyncStatus.SUCCESS, syncedAt, null, null, syncedAt);
 
         Instant failedAt = syncedAt.plusSeconds(60);
         this.downstreams.updateSyncResult(downstream.id(), SyncStatus.FAILED, syncedAt,
-                "DOWNSTREAM_SYNC_FAILED: connection refused", failedAt);
+                "DOWNSTREAM_SYNC_FAILED: connection refused", null, failedAt);
 
         DownstreamMcp stored = this.downstreams.findById(downstream.id()).orElseThrow();
         assertThat(stored.syncStatus()).isEqualTo(SyncStatus.FAILED);
@@ -72,9 +72,9 @@ class DownstreamMcpRepositoryTest extends AbstractDataTest {
         DownstreamMcp downstream = TestFixtures.downstream(this.gateway.id(), "kb_a");
         this.downstreams.insert(downstream);
         Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
-        this.downstreams.updateSyncResult(downstream.id(), SyncStatus.FAILED, null, "boom", now);
+        this.downstreams.updateSyncResult(downstream.id(), SyncStatus.FAILED, null, "boom", null, now);
 
-        this.downstreams.updateSyncResult(downstream.id(), SyncStatus.SUCCESS, now, null, now);
+        this.downstreams.updateSyncResult(downstream.id(), SyncStatus.SUCCESS, now, null, null, now);
 
         DownstreamMcp stored = this.downstreams.findById(downstream.id()).orElseThrow();
         assertThat(stored.syncStatus()).isEqualTo(SyncStatus.SUCCESS);
@@ -87,16 +87,59 @@ class DownstreamMcpRepositoryTest extends AbstractDataTest {
         DownstreamMcp downstream = TestFixtures.downstream(this.gateway.id(), "kb_a");
         this.downstreams.insert(downstream);
         Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
-        this.downstreams.updateSyncResult(downstream.id(), SyncStatus.SUCCESS, now, null, now);
+        this.downstreams.updateSyncResult(downstream.id(), SyncStatus.SUCCESS, now, null, null, now);
 
         this.downstreams.updateConfig(downstream.id(), "kb_alpha", "https://example.com/mcp/v2",
-                "new-encrypted-blob", now);
+                "new-encrypted-blob", null, now);
 
         DownstreamMcp stored = this.downstreams.findById(downstream.id()).orElseThrow();
         assertThat(stored.name()).isEqualTo("kb_alpha");
         assertThat(stored.url()).isEqualTo("https://example.com/mcp/v2");
         assertThat(stored.encryptedHeadersJson()).isEqualTo("new-encrypted-blob");
         assertThat(stored.syncStatus()).isEqualTo(SyncStatus.SUCCESS);
+    }
+
+    @Test
+    @DisplayName("同步成功写入捕获的原始描述，失败时调用方传旧值即可保留")
+    void syncResultCarriesOriginalDescription() {
+        DownstreamMcp downstream = TestFixtures.downstream(this.gateway.id(), "kb_a");
+        this.downstreams.insert(downstream);
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+
+        this.downstreams.updateSyncResult(downstream.id(), SyncStatus.SUCCESS, now, null,
+                "下游自述：知识库检索", now);
+
+        DownstreamMcp captured = this.downstreams.findById(downstream.id()).orElseThrow();
+        assertThat(captured.originalDescription()).isEqualTo("下游自述：知识库检索");
+
+        // 失败路径按 ToolSyncService 的约定把读到的旧值传回来，捕获因此保留。
+        this.downstreams.updateSyncResult(downstream.id(), SyncStatus.FAILED, now, "boom",
+                captured.originalDescription(), now.plusSeconds(30));
+        assertThat(this.downstreams.findById(downstream.id()).orElseThrow().originalDescription())
+                .isEqualTo("下游自述：知识库检索");
+    }
+
+    @Test
+    @DisplayName("自定义描述随配置写入，且不被同步流程冲掉")
+    void updateConfigWritesCustomDescriptionWithoutTouchingOriginal() {
+        DownstreamMcp downstream = TestFixtures.downstream(this.gateway.id(), "kb_a",
+                "原始自述", null);
+        this.downstreams.insert(downstream);
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+
+        this.downstreams.updateConfig(downstream.id(), "kb_a", downstream.url(),
+                downstream.encryptedHeadersJson(), "运营改写", now);
+        DownstreamMcp stored = this.downstreams.findById(downstream.id()).orElseThrow();
+        assertThat(stored.customDescription()).isEqualTo("运营改写");
+        assertThat(stored.effectiveDescription()).isEqualTo("运营改写");
+
+        // 同步只写 original_description，custom 是操作人配置，必须原样保留。
+        this.downstreams.updateSyncResult(downstream.id(), SyncStatus.SUCCESS, now, null,
+                "新的原始自述", now);
+        DownstreamMcp resynced = this.downstreams.findById(downstream.id()).orElseThrow();
+        assertThat(resynced.originalDescription()).isEqualTo("新的原始自述");
+        assertThat(resynced.customDescription()).isEqualTo("运营改写");
+        assertThat(resynced.effectiveDescription()).isEqualTo("运营改写");
     }
 
     @Test

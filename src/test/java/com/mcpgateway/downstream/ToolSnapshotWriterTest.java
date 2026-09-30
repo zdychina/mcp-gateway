@@ -54,7 +54,7 @@ class ToolSnapshotWriterTest extends AbstractDataTest {
         this.gateways.insert(this.gateway);
         this.downstream = new DownstreamMcp(UUID.randomUUID().toString(), this.gateway.id(), "kb_a",
                 DownstreamMcp.TYPE_STREAMABLE_HTTP, "https://example.com/mcp", null,
-                SyncStatus.PENDING, null, null, Instant.now(), Instant.now());
+                null, null, SyncStatus.PENDING, null, null, Instant.now(), Instant.now());
         this.downstreams.insert(this.downstream);
     }
 
@@ -66,7 +66,7 @@ class ToolSnapshotWriterTest extends AbstractDataTest {
 
     private DownstreamMcp renamedTo(String name) {
         return new DownstreamMcp(this.downstream.id(), this.gateway.id(), name, this.downstream.type(),
-                this.downstream.url(), null, SyncStatus.SUCCESS, null, null,
+                this.downstream.url(), null, null, null, SyncStatus.SUCCESS, null, null,
                 this.downstream.createdAt(), Instant.now());
     }
 
@@ -181,7 +181,7 @@ class ToolSnapshotWriterTest extends AbstractDataTest {
     void failedMergeLeavesOtherDownstreamsAlone() {
         DownstreamMcp other = new DownstreamMcp(UUID.randomUUID().toString(), this.gateway.id(), "kb_b",
                 DownstreamMcp.TYPE_STREAMABLE_HTTP, "https://example.com/b", null,
-                SyncStatus.PENDING, null, null, Instant.now(), Instant.now());
+                null, null, SyncStatus.PENDING, null, null, Instant.now(), Instant.now());
         this.downstreams.insert(other);
         this.writer.merge(other, List.of(tool("search", "d")), Instant.now());
 

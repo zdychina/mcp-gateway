@@ -27,8 +27,14 @@ final class TestFixtures {
     }
 
     static DownstreamMcp downstream(String gatewayId, String name) {
+        return downstream(gatewayId, name, null, null);
+    }
+
+    static DownstreamMcp downstream(String gatewayId, String name, String originalDescription,
+            String customDescription) {
         return new DownstreamMcp(id(), gatewayId, name, DownstreamMcp.TYPE_STREAMABLE_HTTP,
                 "https://example.com/mcp/" + name, "encrypted-blob",
+                originalDescription, customDescription,
                 SyncStatus.PENDING, null, null, NOW, NOW);
     }
 

@@ -90,7 +90,7 @@ class CallRecordApiTest extends AbstractApiTest {
     private String seedDownstream(String owner, String name) {
         DownstreamMcp downstream = new DownstreamMcp(UUID.randomUUID().toString(), owner, name,
                 DownstreamMcp.TYPE_STREAMABLE_HTTP, "https://kb.example.com/mcp", null,
-                SyncStatus.SUCCESS, BASE, null, BASE, BASE);
+                null, null, SyncStatus.SUCCESS, BASE, null, BASE, BASE);
         this.downstreams.insert(downstream);
         return downstream.id();
     }

@@ -77,6 +77,12 @@ export interface DownstreamMcp {
   type: string
   url: string
   headers: Record<string, string>
+  /** 同步时从下游 initialize 的 instructions 捕获的"自述"；下游没提供或同步失败保留上次值 */
+  originalDescription: string | null
+  /** 操作人写的覆盖描述；为空表示没设置 */
+  customDescription: string | null
+  /** 自定义描述非空时用它，否则回退原始描述。由服务端算好，展示和 instructions 组合共用 */
+  effectiveDescription: string | null
   syncStatus: SyncStatus
   /** 需求 6.4.7：含义是"快照有多新"，不是"上次尝试是什么时候"。同步失败时停在上一次成功的时刻 */
   lastSyncAt: string | null
@@ -171,6 +177,12 @@ export interface UpdateDownstreamRequest {
   name: string
   url: string
   headers?: Record<string, string>
+  /**
+   * 自定义描述。注意这是 **PUT 全量语义**，与 headers / 工具的三态都不同：
+   * 每次提交都要带上这个字段 —— `null` 或空白表示清除、回退到捕获的原始描述。
+   * 界面保存时始终显式传值，不依赖"不出现 = 不改"。
+   */
+  customDescription: string | null
 }
 
 /**

@@ -58,6 +58,9 @@ function downstream(overrides: Partial<DownstreamMcp> = {}): DownstreamMcp {
     type: 'streamable-http',
     url: 'https://kb.example.com/mcp',
     headers: { Authorization: '******' },
+    originalDescription: null,
+    customDescription: null,
+    effectiveDescription: null,
     syncStatus: 'SUCCESS',
     lastSyncAt: '2026-08-31T09:00:00Z',
     lastSyncError: null,
@@ -211,7 +214,8 @@ describe('需求 12.4：headers 只显示遮罩值，且默认不回传', () => 
     // 关键：不是 headers === undefined，而是这个键压根不存在。
     // 把页面上的遮罩值传回去会把真凭证覆盖成 ******
     expect('headers' in request).toBe(false)
-    expect(request).toEqual({ name: 'kb_a', url: 'https://kb.example.com/mcp' })
+    // customDescription 是 PUT 全量语义：哪怕没填也显式传 null，表示保持回退原始
+    expect(request).toEqual({ name: 'kb_a', url: 'https://kb.example.com/mcp', customDescription: null })
   })
 
   it('勾选并填入内容时整体替换', async () => {
@@ -250,6 +254,46 @@ describe('需求 12.4：headers 只显示遮罩值，且默认不回传', () => 
 
     expect(downstreamApi.update).not.toHaveBeenCalled()
     expect(useAlerts().items[0].title).toBe('headers 不是合法 JSON')
+  })
+})
+
+describe('子 MCP 描述：同步捕获 + 覆盖（PUT 全量语义）', () => {
+  it('捕获的原始描述以"原始"标签展示', async () => {
+    gatewayApi.detail.mockResolvedValue(
+      detail({ downstreams: [downstream({ originalDescription: '下游自述：知识库检索' })] }))
+    const view = await render()
+
+    expect(view.text()).toContain('下游自述：知识库检索')
+  })
+
+  it('下游没有自述时说明会自动捕获', async () => {
+    const view = await render()
+
+    expect(view.text()).toContain('下游未提供说明')
+  })
+
+  it('填了自定义描述随保存一起提交', async () => {
+    downstreamApi.update.mockResolvedValue({ gateway: detail(), syncResult: null })
+    const view = await render()
+
+    await view.find('#ds-desc-ds-1').setValue('运营改写')
+    await downstreamForm(view).trigger('submit')
+    await flushPromises()
+
+    expect(downstreamApi.update.mock.calls[0][2].customDescription).toBe('运营改写')
+  })
+
+  it('留空时显式提交 null，表示回退原始描述', async () => {
+    gatewayApi.detail.mockResolvedValue(
+      detail({ downstreams: [downstream({ customDescription: '旧的覆盖' })] }))
+    downstreamApi.update.mockResolvedValue({ gateway: detail(), syncResult: null })
+    const view = await render()
+
+    await view.find('#ds-desc-ds-1').setValue('   ')
+    await downstreamForm(view).trigger('submit')
+    await flushPromises()
+
+    expect(downstreamApi.update.mock.calls[0][2].customDescription).toBeNull()
   })
 })
 

@@ -61,6 +61,8 @@ public class GatewayService {
      *
      * 只有会改变 slug 或 instructions 的操作需要失效对外的 MCP 上下文；
      * 工具启停和重新同步不需要，因为工具目录是每次请求现读数据库快照的。
+     * 子 MCP 的名称/描述变化也会改写 instructions，失效入口在
+     * {@link DownstreamMcpService} 和 ToolSyncService。
      */
     private final GatewayMcpRegistry mcpRegistry;
 
@@ -216,6 +218,8 @@ public class GatewayService {
                     return new DownstreamMcpResponse(
                             downstream.id(), downstream.name(), downstream.type(), downstream.url(),
                             this.headerCodec.maskedView(downstream.encryptedHeadersJson()),
+                            downstream.originalDescription(), downstream.customDescription(),
+                            downstream.effectiveDescription(),
                             downstream.syncStatus(), downstream.lastSyncAt(), downstream.lastSyncError(),
                             downstreamTools.size(), downstreamTools);
                 })
@@ -228,7 +232,8 @@ public class GatewayService {
                 gateway.createdAt(), gateway.updatedAt());
     }
 
-    private static String normalizeDescription(String description) {
+    /** 包级开放：{@link DownstreamMcpService} 对自定义描述用同一套归一化规则。 */
+    static String normalizeDescription(String description) {
         if (description == null) {
             return null;
         }

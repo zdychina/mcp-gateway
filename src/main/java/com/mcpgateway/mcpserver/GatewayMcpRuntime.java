@@ -15,7 +15,9 @@ import org.slf4j.LoggerFactory;
  * 一个网关对外的 MCP 服务上下文：独立的 transport + 独立的 SDK server。
  *
  * 刻意**不**往 SDK 里注册任何工具。工具目录完全由 {@link GatewayMcpHandler} 从数据库快照提供，
- * 因此启停工具、重新同步、改描述都不需要重建这个对象 —— 只有网关自身的 slug 或描述变了才需要。
+ * 因此启停工具、重新同步都不需要重建这个对象 —— instructions 是构建时组合好的
+ * （网关描述 + 有描述的子 MCP，见 {@link AgentInstructions}），网关自身的 slug 或描述、
+ * 以及子 MCP 的名称/描述变化才需要重建。
  */
 public final class GatewayMcpRuntime implements AutoCloseable {
 
@@ -27,8 +29,8 @@ public final class GatewayMcpRuntime implements AutoCloseable {
 
     private final McpStatelessSyncServer server;
 
-    private GatewayMcpRuntime(Gateway gateway, GatewayProperties properties, GatewayVersion version,
-            GatewayToolRouter router, ToolCallRecorder recorder) {
+    private GatewayMcpRuntime(Gateway gateway, String instructions, GatewayProperties properties,
+            GatewayVersion version, GatewayToolRouter router, ToolCallRecorder recorder) {
         this.slug = gateway.slug();
 
         this.transport = HttpServletStatelessServerTransport.builder()
@@ -49,8 +51,9 @@ public final class GatewayMcpRuntime implements AutoCloseable {
 
         this.server = McpServer.sync(capturing)
                 .serverInfo("mcp-gateway-" + gateway.slug(), version.value())
-                // 需求 6.1.4：网关描述映射为 initialize 结果里的 instructions
-                .instructions(gateway.description())
+                // 需求 6.1.4：网关描述映射为 initialize 结果里的 instructions，
+                // 现在扩展为网关描述 + 有描述的子 MCP 组合（见 AgentInstructions）。
+                .instructions(instructions)
                 .capabilities(McpSchema.ServerCapabilities.builder().tools(true).build())
                 .requestTimeout(properties.getDownstream().getCallTimeout())
                 .build();
@@ -58,9 +61,9 @@ public final class GatewayMcpRuntime implements AutoCloseable {
         log.info("MCP endpoint ready for gateway [{}] at {}", gateway.slug(), mcpPath(gateway.slug()));
     }
 
-    public static GatewayMcpRuntime create(Gateway gateway, GatewayProperties properties, GatewayVersion version,
-            GatewayToolRouter router, ToolCallRecorder recorder) {
-        return new GatewayMcpRuntime(gateway, properties, version, router, recorder);
+    public static GatewayMcpRuntime create(Gateway gateway, String instructions, GatewayProperties properties,
+            GatewayVersion version, GatewayToolRouter router, ToolCallRecorder recorder) {
+        return new GatewayMcpRuntime(gateway, instructions, properties, version, router, recorder);
     }
 
     /** 需求 FR-04：每个网关的独立 MCP 地址。 */

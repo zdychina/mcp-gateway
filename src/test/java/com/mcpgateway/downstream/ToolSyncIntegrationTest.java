@@ -88,7 +88,7 @@ class ToolSyncIntegrationTest {
     private DownstreamMcp createDownstream(String name, String path, Map<String, String> headers) {
         DownstreamMcp downstream = new DownstreamMcp(UUID.randomUUID().toString(), this.gateway.id(), name,
                 DownstreamMcp.TYPE_STREAMABLE_HTTP, "http://localhost:" + this.port + path,
-                this.headerCodec.encrypt(headers), SyncStatus.PENDING, null, null,
+                this.headerCodec.encrypt(headers), null, null, SyncStatus.PENDING, null, null,
                 Instant.now(), Instant.now());
         this.downstreams.insert(downstream);
         return downstream;
@@ -206,12 +206,22 @@ class ToolSyncIntegrationTest {
 
     /** 编辑用的 PUT。返回响应体原文，断言里直接看 JSON。 */
     private String updateDownstream(String downstreamId, String name, String path) {
+        return updateDownstream(downstreamId, name, path, null);
+    }
+
+    /**
+     * 带自定义描述的编辑 PUT。customDescription 显式传 null 与不传等价 ——
+     * 本接口是 PUT 全量语义，null/空白即清除覆盖。
+     */
+    private String updateDownstream(String downstreamId, String name, String path, String customDescription) {
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("name", name);
+        body.put("url", "http://localhost:" + this.port + path);
+        body.put("customDescription", customDescription);
         return this.restTemplate.exchange(
                 "/api/gateways/{gatewayId}/mcp-servers/{serverId}",
                 org.springframework.http.HttpMethod.PUT,
-                new org.springframework.http.HttpEntity<>(Map.of(
-                        "name", name,
-                        "url", "http://localhost:" + this.port + path)),
+                new org.springframework.http.HttpEntity<>(body),
                 String.class,
                 this.gateway.id(), downstreamId).getBody();
     }
@@ -279,6 +289,92 @@ class ToolSyncIntegrationTest {
         assertThat(after.lastSyncedAt()).isAfterOrEqualTo(before.lastSyncedAt());
     }
 
+    // ------------------------------------------------------------ 描述捕获
+
+    @Test
+    @DisplayName("同步时把下游 initialize 的 instructions 捕获为原始描述")
+    void syncCapturesDownstreamInstructions() {
+        DownstreamMcp downstream = createDownstream("kb_b", MockDownstreamConfig.KB_B_PATH, Map.of());
+
+        this.syncService.sync(downstream.id());
+
+        DownstreamMcp stored = this.downstreams.findById(downstream.id()).orElseThrow();
+        assertThat(stored.originalDescription()).isEqualTo(MockDownstreamConfig.KB_B_INSTRUCTIONS);
+        // 没有自定义描述时，生效描述就是捕获的原文
+        assertThat(stored.effectiveDescription()).isEqualTo(MockDownstreamConfig.KB_B_INSTRUCTIONS);
+    }
+
+    @Test
+    @DisplayName("下游没有提供 instructions 时原始描述保持为空")
+    void syncWithoutDownstreamInstructionsLeavesOriginalNull() {
+        DownstreamMcp downstream = createDownstream("kb_a", MockDownstreamConfig.KB_A_PATH, Map.of());
+
+        this.syncService.sync(downstream.id());
+
+        assertThat(this.downstreams.findById(downstream.id()).orElseThrow().originalDescription()).isNull();
+    }
+
+    @Test
+    @DisplayName("换地址重新同步后，原始描述换成新下游的自述")
+    void resyncAfterUrlChangeRefreshesCapturedDescription() {
+        DownstreamMcp downstream = createDownstream("kb_b", MockDownstreamConfig.KB_B_PATH, Map.of());
+        this.syncService.sync(downstream.id());
+        assertThat(this.downstreams.findById(downstream.id()).orElseThrow().originalDescription())
+                .isEqualTo(MockDownstreamConfig.KB_B_INSTRUCTIONS);
+
+        // 指到没有自述的 kb_a 再同步：捕获跟着换成新下游的"没有自述"
+        this.downstreams.updateConfig(downstream.id(), "kb_b",
+                "http://localhost:" + this.port + MockDownstreamConfig.KB_A_PATH, null, null, Instant.now());
+        this.syncService.sync(downstream.id());
+
+        assertThat(this.downstreams.findById(downstream.id()).orElseThrow().originalDescription()).isNull();
+    }
+
+    @Test
+    @DisplayName("需求 6.4.7 同款语义：同步失败保留上一次捕获的原始描述")
+    void failedSyncKeepsThePreviousCapture() {
+        DownstreamMcp downstream = createDownstream("kb_b", MockDownstreamConfig.KB_B_PATH, Map.of());
+        this.syncService.sync(downstream.id());
+
+        this.downstreams.updateConfig(downstream.id(), "kb_b", "http://localhost:1/mcp", null, null, Instant.now());
+        ToolSyncService.SyncReport report = this.syncService.sync(downstream.id());
+
+        assertThat(report.succeeded()).isFalse();
+        assertThat(this.downstreams.findById(downstream.id()).orElseThrow().originalDescription())
+                .isEqualTo(MockDownstreamConfig.KB_B_INSTRUCTIONS);
+    }
+
+    @Test
+    @DisplayName("只改自定义描述不触发重新同步，且立即生效")
+    void customDescriptionAloneDoesNotResync() {
+        DownstreamMcp downstream = createDownstream("kb_b", MockDownstreamConfig.KB_B_PATH, Map.of());
+        this.syncService.sync(downstream.id());
+
+        String body = updateDownstream(downstream.id(), "kb_b", MockDownstreamConfig.KB_B_PATH, "运营改写");
+
+        // 响应明确说没有走同步；描述覆盖直接落库生效
+        assertThat(body).contains("\"syncResult\":null");
+        DownstreamMcp stored = this.downstreams.findById(downstream.id()).orElseThrow();
+        assertThat(stored.customDescription()).isEqualTo("运营改写");
+        // 自定义描述优先于捕获的原始描述
+        assertThat(stored.effectiveDescription()).isEqualTo("运营改写");
+        assertThat(stored.syncStatus()).isEqualTo(SyncStatus.SUCCESS);
+    }
+
+    @Test
+    @DisplayName("PUT 传空白自定义描述即清除，回退到捕获的原始描述")
+    void blankCustomDescriptionClearsOverride() {
+        DownstreamMcp downstream = createDownstream("kb_b", MockDownstreamConfig.KB_B_PATH, Map.of());
+        this.syncService.sync(downstream.id());
+        updateDownstream(downstream.id(), "kb_b", MockDownstreamConfig.KB_B_PATH, "运营改写");
+
+        updateDownstream(downstream.id(), "kb_b", MockDownstreamConfig.KB_B_PATH, " ");
+
+        DownstreamMcp stored = this.downstreams.findById(downstream.id()).orElseThrow();
+        assertThat(stored.customDescription()).isNull();
+        assertThat(stored.effectiveDescription()).isEqualTo(MockDownstreamConfig.KB_B_INSTRUCTIONS);
+    }
+
     // ------------------------------------------------------------ 失败路径
 
     @Test
@@ -290,7 +386,7 @@ class ToolSyncIntegrationTest {
         assertThat(successfulSyncAt).isNotNull();
 
         // 把地址改成一个连不上的端口，再同步
-        this.downstreams.updateConfig(downstream.id(), "kb_a", "http://localhost:1/mcp", null, Instant.now());
+        this.downstreams.updateConfig(downstream.id(), "kb_a", "http://localhost:1/mcp", null, null, Instant.now());
         ToolSyncService.SyncReport report = this.syncService.sync(downstream.id());
 
         assertThat(report.succeeded()).isFalse();
@@ -313,7 +409,7 @@ class ToolSyncIntegrationTest {
                 Map.of("Authorization", REAL_TOKEN));
         // 指到一个连不上的端口，凭证保持不变
         this.downstreams.updateConfig(downstream.id(), "kb_a", "http://localhost:1/mcp",
-                this.headerCodec.encrypt(Map.of("Authorization", REAL_TOKEN)), Instant.now());
+                this.headerCodec.encrypt(Map.of("Authorization", REAL_TOKEN)), null, Instant.now());
 
         ToolSyncService.SyncReport report = this.syncService.sync(downstream.id());
 
@@ -330,7 +426,7 @@ class ToolSyncIntegrationTest {
     void oneBrokenDownstreamDoesNotAffectTheOther() {
         DownstreamMcp healthy = createDownstream("kb_a", MockDownstreamConfig.KB_A_PATH, Map.of());
         DownstreamMcp broken = createDownstream("kb_dead", MockDownstreamConfig.KB_A_PATH, Map.of());
-        this.downstreams.updateConfig(broken.id(), "kb_dead", "http://localhost:1/mcp", null, Instant.now());
+        this.downstreams.updateConfig(broken.id(), "kb_dead", "http://localhost:1/mcp", null, null, Instant.now());
 
         ToolSyncService.SyncReport brokenReport = this.syncService.sync(broken.id());
         ToolSyncService.SyncReport healthyReport = this.syncService.sync(healthy.id());

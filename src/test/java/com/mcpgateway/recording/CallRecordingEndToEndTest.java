@@ -119,7 +119,7 @@ class CallRecordingEndToEndTest {
                 DownstreamMcp.TYPE_STREAMABLE_HTTP,
                 "http://localhost:" + this.port + MockDownstreamConfig.KB_A_PATH,
                 this.headerCodec.encrypt(Map.of("Authorization", DOWNSTREAM_TOKEN)),
-                SyncStatus.PENDING, null, null, Instant.now(), Instant.now());
+                null, null, SyncStatus.PENDING, null, null, Instant.now(), Instant.now());
         this.downstreams.insert(this.downstream);
         assertThat(this.syncService.sync(this.downstream.id()).succeeded()).isTrue();
     }
@@ -276,7 +276,7 @@ class CallRecordingEndToEndTest {
     @DisplayName("需求 15.4.2：下游不可达时生成 ERROR 记录并带上耗时")
     void downstreamFailureProducesAnErrorRecord() {
         this.downstreams.updateConfig(this.downstream.id(), "kb_a", "http://localhost:1/mcp",
-                this.headerCodec.encrypt(Map.of("Authorization", DOWNSTREAM_TOKEN)), Instant.now());
+                this.headerCodec.encrypt(Map.of("Authorization", DOWNSTREAM_TOKEN)), null, Instant.now());
         McpSyncClient agent = agent();
 
         assertThat(catchThrowable(() -> agent.callTool(
@@ -301,7 +301,7 @@ class CallRecordingEndToEndTest {
         agent.callTool(new McpSchema.CallToolRequest("kb_a__search", Map.of("q", "hello")));
         // 再制造一次失败，确保错误摘要也是干净的
         this.downstreams.updateConfig(this.downstream.id(), "kb_a", "http://10.1.2.3:9999/mcp",
-                this.headerCodec.encrypt(Map.of("Authorization", DOWNSTREAM_TOKEN)), Instant.now());
+                this.headerCodec.encrypt(Map.of("Authorization", DOWNSTREAM_TOKEN)), null, Instant.now());
         catchThrowable(() -> agent.callTool(
                 new McpSchema.CallToolRequest("kb_a__search", Map.of("q", "x"))));
 

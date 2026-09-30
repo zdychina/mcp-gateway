@@ -37,6 +37,15 @@ public class MockDownstreamMcpServer {
     private final List<String> calledTools = new CopyOnWriteArrayList<>();
 
     public MockDownstreamMcpServer(String label, String path, List<String> initialTools) {
+        this(label, path, initialTools, null);
+    }
+
+    /**
+     * @param instructions 模拟下游 initialize 返回的 instructions（下游"自述"），
+     *                     null 表示这个下游没有提供。SDK 的 server 构建后不可改，
+     *                     想测"换成另一个有不同自述的下游"就换 URL 指向另一个 mock。
+     */
+    public MockDownstreamMcpServer(String label, String path, List<String> initialTools, String instructions) {
         this.label = label;
         this.transport = HttpServletStatelessServerTransport.builder()
                 .messageEndpoint(path)
@@ -49,6 +58,7 @@ public class MockDownstreamMcpServer {
 
         this.server = McpServer.sync(this.transport)
                 .serverInfo("mock-" + label, "1.0.0")
+                .instructions(instructions)
                 .capabilities(McpSchema.ServerCapabilities.builder().tools(true).build())
                 .tools(initialTools.stream().map(this::toolSpec).toList())
                 .build();

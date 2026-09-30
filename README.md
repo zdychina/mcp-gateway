@@ -203,11 +203,13 @@ docker compose up -d --build
 | `GET` | `/api/gateways/{id}/call-records/export` | 已实现，按当前筛选导出 `.xlsx`，有行数上限 |
 | `GET` | `/api/stats` | 已实现，一个时间窗内的聚合数字，总览页的后端 |
 
-两处 PATCH 语义需要注意：
+三处省略语义需要注意，它们**各不相同**：
 
 - 编辑子 MCP 时，请求体里**不传** `headers` 表示保持原有凭证不变，传空对象 `{}` 才是清空。
   前端拿到的 `headers` 是遮罩值，原样提交回来会把真凭证覆盖掉。
-- 修改工具时，不传 `customDescription` 表示不改；传 `null` 或空白串表示清除并回退到原始描述。
+- 同一个 PUT 的 `customDescription` 却是**全量语义**：不传 / `null` / 空白都表示清除并回退到
+  同步捕获的原始描述，"不传 = 不改"不存在 —— 客户端每次都要显式带上这个字段。
+- 修改工具时（PATCH），不传 `customDescription` 表示不改；传 `null` 或空白串表示清除并回退到原始描述。
 
 ## 管理界面
 
@@ -389,6 +391,10 @@ docker compose up -d --build
   一个下游连不上不影响其他（需求 6.2.9）。
 - 同步失败保留上一次成功的快照，只把子 MCP 标记为 `FAILED`；`last_sync_at` 停在上一次成功的时刻，
   因为这个字段的含义是"快照有多新"而不是"上次尝试是什么时候"。
+- 同步还会捕获下游 `initialize` 返回的 `instructions`，存为子 MCP 的原始描述（同样适用上一条
+  的失败保留语义）。它与管理端可编辑的自定义描述（非空时覆盖）一起，按"网关描述 + 有描述的
+  子 MCP 清单"组合成对 Agent 暴露的 `instructions`；文案变化会丢弃缓存的 MCP 上下文，
+  已连接的 Agent 要重连才能拿到新的。见 [USAGE.md §6.2](USAGE.md#62-网关接管了什么)。
 - 重新同步覆盖协议字段（原始描述、Schema、annotations），但保留操作人配置的启停状态和自定义描述。
   这一点由 SQL 结构保证：`updateProtocolFields` 的语句里根本没有那两列。
 - 聚合工具名不合法或超过 128 字符时整次同步失败，不静默截断（需求 6.3.5）。

@@ -8,6 +8,7 @@ import com.mcpgateway.domain.GatewayTool;
 import com.mcpgateway.domain.SyncStatus;
 import com.mcpgateway.error.ErrorCode;
 import com.mcpgateway.error.GatewayException;
+import com.mcpgateway.mcpserver.GatewayMcpRegistry;
 import com.mcpgateway.repository.DownstreamMcpRepository;
 import com.mcpgateway.repository.GatewayToolRepository;
 import com.mcpgateway.security.DownstreamHeaderCodec;
@@ -21,6 +22,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -42,15 +44,18 @@ public class DownstreamMcpService {
 
     private final GatewayProperties properties;
 
+    private final GatewayMcpRegistry mcpRegistry;
+
     public DownstreamMcpService(DownstreamMcpRepository downstreams, GatewayToolRepository tools,
             McpServersImportParser parser, DownstreamHeaderCodec headerCodec, GatewayService gatewayService,
-            GatewayProperties properties) {
+            GatewayProperties properties, GatewayMcpRegistry mcpRegistry) {
         this.downstreams = downstreams;
         this.tools = tools;
         this.parser = parser;
         this.headerCodec = headerCodec;
         this.gatewayService = gatewayService;
         this.properties = properties;
+        this.mcpRegistry = mcpRegistry;
     }
 
     /**
@@ -89,9 +94,11 @@ public class DownstreamMcpService {
         Instant now = Instant.now();
         List<String> createdIds = new ArrayList<>();
         for (McpServersImportParser.ParsedDownstream server : parsed) {
+            // 描述两列都从空开始：原始描述等首次同步从下游捕获，自定义描述由操作人后续填写。
             DownstreamMcp downstream = new DownstreamMcp(UUID.randomUUID().toString(), gatewayId,
                     server.name(), server.type(), server.url(),
                     this.headerCodec.encrypt(server.headers()),
+                    null, null,
                     SyncStatus.PENDING, null, null, now, now);
             this.downstreams.insert(downstream);
             createdIds.add(downstream.id());
@@ -134,9 +141,12 @@ public class DownstreamMcpService {
                 ? existing.encryptedHeadersJson()
                 : this.headerCodec.encrypt(request.headers());
 
+        // 自定义描述是 PUT 全量语义：null/空白表示清除，回退到捕获的原始描述。
+        String customDescription = GatewayService.normalizeDescription(request.customDescription());
+
         String url = request.url().trim();
         Instant now = Instant.now();
-        this.downstreams.updateConfig(downstreamId, name, url, encryptedHeaders, now);
+        this.downstreams.updateConfig(downstreamId, name, url, encryptedHeaders, customDescription, now);
 
         if (!existing.name().equals(name)) {
             renameExposedTools(downstreamId, name, now);
@@ -144,10 +154,17 @@ public class DownstreamMcpService {
                     + "which is a breaking change for connected agents", downstreamId, existing.name(), name);
         }
 
+        // 改名或改自定义描述都会改写 Agent instructions 的组合文案，需要失效 MCP 上下文。
+        if (!existing.name().equals(name)
+                || !Objects.equals(customDescription, existing.customDescription())) {
+            this.mcpRegistry.evict(gatewayId);
+        }
+
         /*
          * 换了地址或换了凭证，下游能给出的工具集就可能变了，快照必须重新拉一次 ——
          * 不拉的话页面上一切正常，工具却还是旧那套，直到 Agent 调用一个已经不存在的工具
          * 才暴露出来。只改名字不用拉：聚合工具名是本地按新名字重算的。
+         * 只改自定义描述同样不用拉：它不来自下游，落库即生效。
          */
         return !existing.url().equals(url) || request.headers() != null;
     }
@@ -158,6 +175,8 @@ public class DownstreamMcpService {
         this.gatewayService.requireGateway(gatewayId);
         requireDownstream(gatewayId, downstreamId);
         this.downstreams.deleteById(downstreamId);
+        // 有描述的子 MCP 从 instructions 组合里消失，同样要失效 MCP 上下文。
+        this.mcpRegistry.evict(gatewayId);
         log.info("deleted downstream {} from gateway {}; its tools are no longer exposed",
                 downstreamId, gatewayId);
     }

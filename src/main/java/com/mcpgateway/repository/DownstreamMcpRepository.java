@@ -16,6 +16,7 @@ public class DownstreamMcpRepository {
 
     private static final String COLUMNS = """
             id, gateway_id, name, type, url, encrypted_headers_json,
+            original_description, custom_description,
             sync_status, last_sync_at, last_sync_error, created_at, updated_at
             """;
 
@@ -26,6 +27,8 @@ public class DownstreamMcpRepository {
             rs.getString("type"),
             rs.getString("url"),
             rs.getString("encrypted_headers_json"),
+            rs.getString("original_description"),
+            rs.getString("custom_description"),
             SyncStatus.valueOf(rs.getString("sync_status")),
             Timestamps.fromDb(rs, "last_sync_at"),
             rs.getString("last_sync_error"),
@@ -41,8 +44,10 @@ public class DownstreamMcpRepository {
     public void insert(DownstreamMcp downstream) {
         this.jdbcClient.sql("""
                 INSERT INTO downstream_mcp (id, gateway_id, name, type, url, encrypted_headers_json,
+                                            original_description, custom_description,
                                             sync_status, last_sync_at, last_sync_error, created_at, updated_at)
                 VALUES (:id, :gatewayId, :name, :type, :url, :encryptedHeadersJson,
+                        :originalDescription, :customDescription,
                         :syncStatus, :lastSyncAt, :lastSyncError, :createdAt, :updatedAt)
                 """)
                 .param("id", downstream.id())
@@ -51,6 +56,8 @@ public class DownstreamMcpRepository {
                 .param("type", downstream.type())
                 .param("url", downstream.url())
                 .param("encryptedHeadersJson", downstream.encryptedHeadersJson())
+                .param("originalDescription", downstream.originalDescription())
+                .param("customDescription", downstream.customDescription())
                 .param("syncStatus", downstream.syncStatus().name())
                 .param("lastSyncAt", Timestamps.toDb(downstream.lastSyncAt()))
                 .param("lastSyncError", downstream.lastSyncError())
@@ -59,18 +66,24 @@ public class DownstreamMcpRepository {
                 .update();
     }
 
-    /** 更新配置。同步状态由 {@link #updateSyncResult} 单独维护，避免两条语义互相覆盖。 */
-    public int updateConfig(String id, String name, String url, String encryptedHeadersJson, Instant updatedAt) {
+    /**
+     * 更新配置。custom_description 是操作人的配置，归配置写；
+     * 同步状态和协议捕获的 original_description 由 {@link #updateSyncResult} 单独维护，
+     * 避免两条语义互相覆盖。
+     */
+    public int updateConfig(String id, String name, String url, String encryptedHeadersJson,
+            String customDescription, Instant updatedAt) {
         return this.jdbcClient.sql("""
                 UPDATE downstream_mcp
                    SET name = :name, url = :url, encrypted_headers_json = :encryptedHeadersJson,
-                       updated_at = :updatedAt
+                       custom_description = :customDescription, updated_at = :updatedAt
                  WHERE id = :id
                 """)
                 .param("id", id)
                 .param("name", name)
                 .param("url", url)
                 .param("encryptedHeadersJson", encryptedHeadersJson)
+                .param("customDescription", customDescription)
                 .param("updatedAt", Timestamps.toDb(updatedAt))
                 .update();
     }
@@ -78,19 +91,24 @@ public class DownstreamMcpRepository {
     /**
      * 需求 6.4.7：同步失败时保留上一次成功快照，只把子 MCP 标记为异常。
      * 成功时 lastSyncError 传 null 清空上一次的错误。
+     *
+     * original_description 是协议捕获字段，只在成功路径写入新值；
+     * 失败路径调用方必须把读到的旧值原样传回来，保留上一次的捕获。
      */
     public int updateSyncResult(String id, SyncStatus status, Instant lastSyncAt, String lastSyncError,
-            Instant updatedAt) {
+            String originalDescription, Instant updatedAt) {
         return this.jdbcClient.sql("""
                 UPDATE downstream_mcp
                    SET sync_status = :syncStatus, last_sync_at = :lastSyncAt,
-                       last_sync_error = :lastSyncError, updated_at = :updatedAt
+                       last_sync_error = :lastSyncError, original_description = :originalDescription,
+                       updated_at = :updatedAt
                  WHERE id = :id
                 """)
                 .param("id", id)
                 .param("syncStatus", status.name())
                 .param("lastSyncAt", Timestamps.toDb(lastSyncAt))
                 .param("lastSyncError", lastSyncError)
+                .param("originalDescription", originalDescription)
                 .param("updatedAt", Timestamps.toDb(updatedAt))
                 .update();
     }
