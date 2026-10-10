@@ -99,6 +99,12 @@ export interface GatewayDetail {
   description: string | null
   status: GatewayStatus
   mcpUrl: string
+  /**
+   * Agent 在 initialize 里将拿到的 instructions，服务端按当前模板现算。
+   * 「Agent 接入」段用它做预览 —— 界面上唯一能看到组合效果的地方；
+   * 网关和全部子 MCP 都没有描述时为 null。
+   */
+  instructions: string | null
   downstreams: DownstreamMcp[]
   /**
    * 部署是否关掉了下游 TLS 校验（MCP_GATEWAY_DOWNSTREAM_INSECURE_SKIP_TLS_VERIFY）。

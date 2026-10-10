@@ -2,15 +2,24 @@ package com.mcpgateway.api;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.mcpgateway.AbstractApiTest;
+import com.mcpgateway.domain.DownstreamMcp;
+import com.mcpgateway.domain.SyncStatus;
+import com.mcpgateway.repository.DownstreamMcpRepository;
 import com.mcpgateway.repository.GatewayRepository;
 import com.mcpgateway.security.AccessTokenService;
+import com.mcpgateway.security.DownstreamHeaderCodec;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.time.Instant;
+import java.util.Map;
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -25,7 +34,13 @@ class GatewayApiTest extends AbstractApiTest {
     private GatewayRepository gateways;
 
     @Autowired
+    private DownstreamMcpRepository downstreams;
+
+    @Autowired
     private AccessTokenService accessTokens;
+
+    @Autowired
+    private DownstreamHeaderCodec headerCodec;
 
     private JsonNode createGateway(String slug) throws Exception {
         MvcResult result = this.mockMvc.perform(post("/api/gateways")
@@ -73,6 +88,44 @@ class GatewayApiTest extends AbstractApiTest {
                 .andExpect(status().isOk())
                 // 界面上那条常驻警告靠它渲染，默认必须是 false —— 没关校验就不该有任何噪音
                 .andExpect(jsonPath("$.data.insecureDownstreamTls").value(false));
+    }
+
+    @Test
+    @DisplayName("详情带出 instructions 预览：按当前模板现算，随子 MCP 描述出现而完整")
+    void detailExposesComposedInstructionsPreview() throws Exception {
+        // 子 MCP 还没有描述 → 预览只剩网关描述一段（含 {{downstreams}} 的段落整段省略）
+        String gatewayId = createGateway(uniqueSlug("prev")).at("/data/gateway/id").asText();
+        this.mockMvc.perform(get("/api/gateways/{id}", gatewayId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.instructions").value("聚合两个知识库"));
+
+        // 子 MCP 有了描述 → 预览是完整的默认格式，与 Agent 在 initialize 里拿到的一致
+        this.downstreams.insert(new DownstreamMcp(UUID.randomUUID().toString(), gatewayId, "kb_x",
+                DownstreamMcp.TYPE_STREAMABLE_HTTP, "https://kb.example.com/mcp",
+                this.headerCodec.encrypt(Map.of()), "知识库检索", null, SyncStatus.SUCCESS,
+                Instant.now(), null, Instant.now(), Instant.now()));
+
+        this.mockMvc.perform(get("/api/gateways/{id}", gatewayId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.instructions")
+                        .value("聚合两个知识库\n\n子 MCP：\n- kb_x：知识库检索"));
+    }
+
+    @Test
+    @DisplayName("网关和子 MCP 都没有描述时，instructions 预览为 null")
+    void detailInstructionsPreviewNullWhenNothingToSay() throws Exception {
+        String slug = uniqueSlug("mute");
+        MvcResult created = this.mockMvc.perform(post("/api/gateways")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"无描述网关\",\"slug\":\"%s\"}".formatted(slug)))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String gatewayId = this.objectMapper.readTree(created.getResponse().getContentAsString())
+                .at("/data/gateway/id").asText();
+
+        this.mockMvc.perform(get("/api/gateways/{id}", gatewayId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.instructions").value(nullValue()));
     }
 
     @Test

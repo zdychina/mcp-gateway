@@ -7,7 +7,7 @@ import { useAlerts } from '../../composables/useAlerts'
 import CopyField from '../CopyField.vue'
 import TokenReveal from '../TokenReveal.vue'
 
-const props = defineProps<{ gatewayId: string, mcpUrl: string }>()
+const props = defineProps<{ gatewayId: string, mcpUrl: string, instructions: string | null }>()
 
 const alerts = useAlerts()
 const config = ref<AgentConfig | null>(null)
@@ -64,6 +64,18 @@ async function rotate(): Promise<void> {
         把 <code>&lt;gateway-access-token&gt;</code> 换成实际令牌。服务端只保存令牌哈希，
         拿不回明文；忘了就轮换一个新的。
       </span>
+
+      <div class="field">
+        <label>Agent 看到的 instructions（预览）</label>
+        <pre v-if="instructions" class="json-block">{{ instructions }}</pre>
+        <span v-else class="hint">
+          当前组合结果为空 —— 网关和所有子 MCP 都没有描述时，Agent 拿到的 instructions 就是空的。
+        </span>
+        <span class="hint">
+          按当前模板现算，与 Agent 下次连接（initialize）拿到的完全一致；
+          已连接的 Agent 要重连才能看到更新。
+        </span>
+      </div>
 
       <div class="btn-row">
         <button class="btn btn-danger" type="button" :disabled="busy" @click="rotate">

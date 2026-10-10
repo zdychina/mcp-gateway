@@ -222,6 +222,7 @@ docker compose up -d --build
   全部图表来自同一个接口的同一份数据，避免"总量对得上、分组对不上"的中间态。
 - **列表页** `/ui/gateways`：名称、slug、MCP 地址、状态、子 MCP 数量、工具数量、更新时间，以及创建和删除。
 - **详情页** `/ui/gateways/{id}`：基本信息 / 子 MCP 配置 / 聚合工具 / Agent 接入 四段。
+  Agent 接入段有按当前模板现算的 `instructions` 预览 —— 界面上唯一能看到组合效果的地方。
 - **调用记录页** `/ui/gateways/{id}/calls`：按工具、子 MCP、状态、trace_id 和时间筛选，展开看入参与返回；
   列可配置（含按 JSON Pointer 抽取正文字段），可按当前筛选导出 Excel。
 

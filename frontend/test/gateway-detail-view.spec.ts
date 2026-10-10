@@ -78,6 +78,8 @@ function detail(overrides: Partial<GatewayDetail> = {}): GatewayDetail {
     description: '网关用途说明',
     status: 'READY',
     mcpUrl: 'http://127.0.0.1:8080/mcp/kb-gateway',
+    // 默认夹具的子 MCP 没有描述，默认模板下组合结果就只剩网关描述一段
+    instructions: '网关用途说明',
     downstreams: [downstream()],
     insecureDownstreamTls: false,
     createdAt: '2026-08-30T10:00:00Z',
@@ -649,6 +651,31 @@ describe('破坏性变更要二次确认', () => {
     await flushPromises()
 
     expect(vi.mocked(confirm).mock.calls.some(call => String(call[0]).includes('聚合名'))).toBe(true)
+  })
+})
+
+describe('Agent 接入段的 instructions 预览', () => {
+  it('展示服务端现算的组合结果，并提醒已连接的 Agent 要重连', async () => {
+    gatewayApi.detail.mockResolvedValue(detail({
+      instructions: '网关用途说明\n\n子 MCP：\n- kb_a：知识库检索',
+      downstreams: [downstream({
+        originalDescription: '知识库检索',
+        effectiveDescription: '知识库检索'
+      })]
+    }))
+    const view = await render()
+
+    expect(view.find('pre.json-block').text())
+      .toBe('网关用途说明\n\n子 MCP：\n- kb_a：知识库检索')
+    expect(view.text()).toContain('重连才能看到更新')
+  })
+
+  it('组合结果为空时给出解释而不是空白块', async () => {
+    gatewayApi.detail.mockResolvedValue(detail({ description: null, instructions: null }))
+    const view = await render()
+
+    expect(view.find('pre.json-block').exists()).toBe(false)
+    expect(view.text()).toContain('组合结果为空')
   })
 })
 

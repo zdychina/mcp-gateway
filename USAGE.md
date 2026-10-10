@@ -374,7 +374,10 @@ MCP 地址那一列带复制按钮 —— 配 Agent 时要的就是这个地址�
 （"立即"指网关这边；已连接的 Agent 要重新拉一次 `tools/list` 才看得到，见下）。
 停用的工具整行会压暗。描述留空保存表示清除自定义描述、回退到下游的原始描述。
 
-**Agent 接入** —— 复制 MCP 地址和接入 JSON；轮换令牌（新令牌在此当场显示一次，旧令牌立即失效）。
+**Agent 接入** —— 复制 MCP 地址和接入 JSON；轮换令牌（新令牌在此当场显示一次，旧令牌立即失效）；
+还有一段 **instructions 预览**：按当前模板现算的完整组合文案（网关描述 + 子 MCP 描述），与 Agent
+下次连接（`initialize`）拿到的一字不差 —— 配完子 MCP 想确认"Agent 眼里长什么样"，看这里就行，
+不用自己打 `initialize`。预览为空说明网关和所有子 MCP 都没有描述。
 
 ### 4.4 调用记录页 `/ui/gateways/{id}/calls`
 
@@ -913,6 +916,7 @@ Accept: application/json, text/event-stream
 重新同步都立即生效，不需要重建 MCP 上下文。`instructions` 是例外：它在连接建立时定死。
 网关描述、子 MCP 名称或描述（含同步捕获的原始描述）变化后，网关会丢弃缓存的 MCP
 上下文并用新文案重建，但**已连接的 Agent 必须重连**（重新 `initialize`）才能拿到。
+组合结果在管理端详情页「Agent 接入」段有实时预览（见 [§4.3](#43-详情页-uigatewaysid)）。
 
 > **"立即生效"是服务端视角。** 网关不发 `notifications/tools/list_changed` ——
 > 无状态的 streamable-http 下没有可以往回推的长连接，而按需求 16.1 这里也不该长成一套

@@ -14,7 +14,7 @@ Agent 看到的 `instructions` 与 1.3 逐字节相同 —— 这次升级对 Ag
 
 ## 1. 这次升级带来什么
 
-只有一件事：**`instructions` 的组合格式可以自定义了**。
+两件事：**`instructions` 的组合格式可以自定义了**，以及详情页多了一段**组合结果预览**。
 
 1.3 里网关对 Agent 的 `instructions` 是写死的拼接（网关描述 + 「子 MCP：」清单）。
 现在这段拼接变成一个**全局模板**，通过环境变量换成自己的格式：
@@ -35,6 +35,7 @@ MCP_GATEWAY_SERVER_AGENT_INSTRUCTIONS_TEMPLATE='【{{gatewayDescription}}】
 | --- | --- |
 | `instructions` 组合格式模板化 | **不设新环境变量就没有任何变化**：默认模板渲染结果与 1.3 逐字节相同 |
 | 新增可选环境变量 `MCP_GATEWAY_SERVER_AGENT_INSTRUCTIONS_TEMPLATE` | 想自定义格式时才设；设错了（未知占位符）应用起不来，日志会点名是哪个 |
+| 详情页「Agent 接入」段新增 instructions 预览 | 界面上能看到组合后的完整文案，不用打 `initialize` 验证 |
 | 版本号 1.3.0 → 1.4.0 | jar 文件名跟着变。systemd 的 `ExecStart` 如果写死了版本号，要一起改 |
 
 ### 1.1 新增的环境变量
@@ -173,7 +174,9 @@ unzip -p /opt/mcp-gateway/mcp-gateway.jar META-INF/build-info.properties | grep 
 **③ 界面和数据都在**
 
 浏览器打开 `{baseUrl}/`，登录后网关列表条数与升级前一致；随便点一个进详情页，子 MCP
-和聚合工具都在，**headers 显示为遮罩值 `******`**（说明凭证解密正常）。界面这次没有变化。
+和聚合工具都在，**headers 显示为遮罩值 `******`**（说明凭证解密正常）。「Agent 接入」段
+现在多了一块 **instructions 预览**（按当前模板现算的组合文案）—— 有子 MCP 描述的网关
+能看到完整的两段式文案，这就是 ④ 要验证的内容在界面上的呈现。
 
 **④ Agent 看到的 instructions 与升级前一字不差（最关键的一条）**
 

@@ -10,6 +10,7 @@ import com.mcpgateway.api.dto.GatewayToolResponse;
 import com.mcpgateway.api.dto.RotatedTokenResponse;
 import com.mcpgateway.api.dto.UpdateGatewayRequest;
 import com.mcpgateway.config.GatewayProperties;
+import com.mcpgateway.mcpserver.AgentInstructions;
 import com.mcpgateway.mcpserver.GatewayMcpRegistry;
 import com.mcpgateway.domain.DownstreamMcp;
 import com.mcpgateway.domain.Gateway;
@@ -226,8 +227,13 @@ public class GatewayService {
                 .toList();
 
         GatewayStatus status = GatewayStatusCalculator.calculate(owned);
+        // 详情页「Agent 接入」段的 instructions 预览。与 GatewayMcpRegistry 用同一份
+        // 模板和同一自然序下游列表（owned 未按名称重排），预览因此与 Agent 下次
+        // initialize 实际拿到的一字不差 —— 配置人不用打 initialize 就能验证组合效果。
+        String instructions = AgentInstructions.compose(
+                this.properties.getServer().getAgentInstructionsTemplate(), gateway, owned);
         return new GatewayDetailResponse(gateway.id(), gateway.name(), gateway.slug(), gateway.description(),
-                status, mcpUrl(gateway.slug()), downstreamViews,
+                status, mcpUrl(gateway.slug()), instructions, downstreamViews,
                 this.properties.getDownstream().isInsecureSkipTlsVerify(),
                 gateway.createdAt(), gateway.updatedAt());
     }

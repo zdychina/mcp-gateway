@@ -114,8 +114,10 @@ async function onDeleted(): Promise<void> {
     <ToolsSection :gateway-id="gateway.id" :downstreams="gateway.downstreams"
                   @tool-updated="replaceTool" />
 
-    <!-- slug 改了 mcpUrl 就变了，用它做 key 让接入 JSON 自动重取 -->
-    <AgentAccessCard :key="gateway.mcpUrl" :gateway-id="gateway.id" :mcp-url="gateway.mcpUrl" />
+    <!-- slug 改了 mcpUrl 就变了，用它做 key 让接入 JSON 自动重取；instructions 预览跟
+         详情状态走，父组件变更后重取的 detail 会带着新组合结果，不需要额外的重取逻辑 -->
+    <AgentAccessCard :key="gateway.mcpUrl" :gateway-id="gateway.id" :mcp-url="gateway.mcpUrl"
+                     :instructions="gateway.instructions" />
 
     <p class="small muted">
       创建于 {{ formatDateTime(gateway.createdAt) }}　·　
