@@ -27,6 +27,11 @@ services:
       # 挂在子路径下时的前缀，如 /kbmcp。默认空，应用占据整个根路径。
       # 它同时是上面 build.args 的输入，两处必须同值，所以只在这一个变量里写。
       MCP_GATEWAY_CONTEXT_PATH: ${MCP_GATEWAY_CONTEXT_PATH:-}
+      # 对 Agent 暴露的 instructions 组合模板，占位符 {{gatewayDescription}} / {{downstreams}}。
+      # 留空 = 内置默认（网关描述 + 子 MCP 清单）；含未知或残缺 {{...}} 时容器起不来；
+      # 改动需重启。写多行模板时用 YAML 字面量块（|，段与段之间留一个空行）或 "\n" 转义；
+      # 不要用折块 >-，它会把换行折叠成空格、段落结构就没了。见 USAGE.md §6.2。
+      MCP_GATEWAY_SERVER_AGENT_INSTRUCTIONS_TEMPLATE: ${MCP_GATEWAY_SERVER_AGENT_INSTRUCTIONS_TEMPLATE:-}
       # 关掉子 MCP 的 TLS 证书与主机名校验。默认 false，保持这样。
       # 只有"内网自签证书 + 拿不到根证书"这一种情况才设 true —— 打开之后下游凭证会在
       # 无法验证对方身份的连接上传输。更好的做法是把 CA 导进信任库，见 SECURITY.md。

@@ -61,6 +61,7 @@ PowerShell 下：
 | `MCP_GATEWAY_CONTEXT_PATH` | 否 | 空 | 子路径部署的前缀，如 `/kbmcp`。**必须与构建时的 `-Dvite.base.path` 同值**，且反代不要剥前缀，见 [DEPLOY.md](DEPLOY.md#挂在子路径下) |
 | `MCP_GATEWAY_DB_PATH` | 否 | `./data/mcp-gateway` | H2 文件库路径。库里含知识库返回内容，需按部署要求保护（FR-06.4） |
 | `MCP_GATEWAY_ALLOWED_ORIGINS` | 否 | 空 | 逗号分隔。内网部署时显式配置允许来源 |
+| `MCP_GATEWAY_SERVER_AGENT_INSTRUCTIONS_TEMPLATE` | 否 | 内置默认模板 | 对 Agent 暴露的 `instructions` 组合模板，占位符 `{{gatewayDescription}}` / `{{downstreams}}`。含未知或残缺 `{{...}}` 时启动失败；改动需重启。见 [USAGE.md §6.2](USAGE.md#62-网关接管了什么) |
 | `MCP_GATEWAY_DOWNSTREAM_INSECURE_SKIP_TLS_VERIFY` | 否 | `false` | 关掉子 MCP 的证书链与主机名校验。只为"内网自签证书且拿不到根证书"存在，见 [SECURITY.md](SECURITY.md#下游-tls-校验) |
 
 ## 构建与测试
@@ -393,8 +394,9 @@ docker compose up -d --build
   因为这个字段的含义是"快照有多新"而不是"上次尝试是什么时候"。
 - 同步还会捕获下游 `initialize` 返回的 `instructions`，存为子 MCP 的原始描述（同样适用上一条
   的失败保留语义）。它与管理端可编辑的自定义描述（非空时覆盖）一起，按"网关描述 + 有描述的
-  子 MCP 清单"组合成对 Agent 暴露的 `instructions`；文案变化会丢弃缓存的 MCP 上下文，
-  已连接的 Agent 要重连才能拿到新的。见 [USAGE.md §6.2](USAGE.md#62-网关接管了什么)。
+  子 MCP 清单"组合成对 Agent 暴露的 `instructions`（组合格式可配，默认即此格式，见
+  [USAGE.md §6.2](USAGE.md#62-网关接管了什么)）；文案变化会丢弃缓存的 MCP 上下文，
+  已连接的 Agent 要重连才能拿到新的。
 - 重新同步覆盖协议字段（原始描述、Schema、annotations），但保留操作人配置的启停状态和自定义描述。
   这一点由 SQL 结构保证：`updateProtocolFields` 的语句里根本没有那两列。
 - 聚合工具名不合法或超过 128 字符时整次同步失败，不静默截断（需求 6.3.5）。

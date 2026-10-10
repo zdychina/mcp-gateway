@@ -1,5 +1,6 @@
 package com.mcpgateway.config;
 
+import com.mcpgateway.mcpserver.AgentInstructions;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -202,6 +203,14 @@ public class GatewayProperties {
         @Min(1)
         private int maxDownstreamPerGateway = 3;
 
+        /**
+         * 对外 instructions 的组合模板（占位符与渲染规则见 {@link AgentInstructions}）。
+         * 默认值引用 {@code AgentInstructions.DEFAULT_TEMPLATE}，这份文案在仓库里只出现一次。
+         * 空白 = 用内置默认；含未知/残缺 {@code {{...}}} 时应用启动失败；改动需重启 ——
+         * instructions 在 MCP 上下文构建时定死，没有热更新。
+         */
+        private String agentInstructionsTemplate = AgentInstructions.DEFAULT_TEMPLATE;
+
         public int getMaxRequestSize() {
             return this.maxRequestSize;
         }
@@ -216,6 +225,14 @@ public class GatewayProperties {
 
         public void setMaxDownstreamPerGateway(int maxDownstreamPerGateway) {
             this.maxDownstreamPerGateway = maxDownstreamPerGateway;
+        }
+
+        public String getAgentInstructionsTemplate() {
+            return this.agentInstructionsTemplate;
+        }
+
+        public void setAgentInstructionsTemplate(String agentInstructionsTemplate) {
+            this.agentInstructionsTemplate = agentInstructionsTemplate;
         }
     }
 }

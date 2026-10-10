@@ -108,6 +108,11 @@ mcp-gateway:
     max-request-size: 1048576
     # 需求 6.2.1：每个网关最多 3 个子 MCP。
     max-downstream-per-gateway: 3
+    # 对外 instructions 的组合模板：{{gatewayDescription}} = 网关描述，{{downstreams}} = 有描述的
+    # 子 MCP 清单。模板按空行分段，解析为空的占位符所在段整段省略；环境变量留空 = 内置默认
+    # （网关描述 + 「子 MCP：」清单，与 1.3 输出相同）。含未知或残缺 {{...}} 时启动失败；
+    # 改动需重启。详见 USAGE.md §6.2。
+    agent-instructions-template: ${MCP_GATEWAY_SERVER_AGENT_INSTRUCTIONS_TEMPLATE:}
 
 management:
   endpoints:

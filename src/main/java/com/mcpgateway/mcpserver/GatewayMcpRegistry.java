@@ -47,6 +47,9 @@ public class GatewayMcpRegistry implements AutoCloseable {
     public GatewayMcpRegistry(GatewayRepository gateways, DownstreamMcpRepository downstreams,
             GatewayProperties properties, GatewayVersion version,
             GatewayToolRouter router, ToolCallRecorder recorder) {
+        // 与 AdminAccount / AesGcmCipher 同款的启动期 fail-fast：坏模板让应用起不来，
+        // 而不是把字面 {{...}} 静默发给 Agent、等有人从行为倒查回来。
+        AgentInstructions.validate(properties.getServer().getAgentInstructionsTemplate());
         this.gateways = gateways;
         this.downstreams = downstreams;
         this.properties = properties;
@@ -77,7 +80,8 @@ public class GatewayMcpRegistry implements AutoCloseable {
             // resolve 每个请求都会走，不能把这条查询放到 compute 之外。
             List<DownstreamMcp> owned = this.downstreams.findByGatewayId(gateway.id());
             return new Entry(gateway.id(), GatewayMcpRuntime.create(gateway,
-                    AgentInstructions.compose(gateway, owned),
+                    AgentInstructions.compose(
+                            this.properties.getServer().getAgentInstructionsTemplate(), gateway, owned),
                     this.properties, this.version, this.router, this.recorder));
         });
         return Optional.of(new Resolved(gateway, entry.runtime));

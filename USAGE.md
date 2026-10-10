@@ -887,18 +887,27 @@ Accept: application/json, text/event-stream
 | `tools/call` | **网关**，按聚合名路由到子 MCP，全程打点 |
 | `initialize` / `ping` / 其他 | 官方 SDK 原样处理 |
 
-`initialize` 返回的 `instructions` 是**组合**出来的，不只来自网关描述：
+`initialize` 返回的 `instructions` 是按**模板**组合出来的，不只来自网关描述。默认模板：
 
 ```
-<网关描述>
+{{gatewayDescription}}
 
 子 MCP：
-- <子MCP名>：<生效描述>
+{{downstreams}}
 ```
 
+- `{{gatewayDescription}}` 渲染成网关描述；`{{downstreams}}` 渲染成有生效描述的子 MCP 清单
+  （每条 `- <子MCP名>：<生效描述>`，一条一行）
 - 子 MCP 的生效描述 = 自定义描述非空时用它，否则回退同步捕获的原始描述
   （下游自己 `initialize` 返回的 `instructions`，见 [§5.2](#52-子-mcp)）
-- 只列出**有**生效描述的子 MCP；没有网关描述、也没有任何有描述的子 MCP 时，`instructions` 为空
+- 模板按空行分段，**解析为空的占位符所在段整段省略**：子 MCP 都没描述时「子 MCP：」标题
+  不会残留；没有网关描述、也没有任何有描述的子 MCP 时，`instructions` 为空
+
+组合格式可以通过 `MCP_GATEWAY_SERVER_AGENT_INSTRUCTIONS_TEMPLATE`（或
+`mcp-gateway.server.agent-instructions-template`）换成自己的模板 —— 换标题、换语言、
+只保留一侧都可以。规则：空白 = 用内置默认；含未知或残缺的 `{{...}}` 时**启动失败**
+（把字面 `{{` 发给 Agent 是只能从 Agent 行为倒查的配置错误，宁可起不来）；模板在进程
+启动时读入，改动需重启。
 
 网关的 SDK server **不注册任何工具** —— 工具目录由网关自己每次从数据库读，所以启停、
 重新同步都立即生效，不需要重建 MCP 上下文。`instructions` 是例外：它在连接建立时定死。
@@ -965,6 +974,7 @@ JSON-RPC `code` 映射：`TOOL_NOT_FOUND` / `TOOL_DISABLED` / `INVALID_TOOL_ARGU
 | `MCP_GATEWAY_DOWNSTREAM_INSECURE_SKIP_TLS_VERIFY` | 否 | `false` | 设为 `true` 时**同时**关掉子 MCP 的证书链校验和主机名校验。只在"内网自签证书且拿不到根证书"时才用 —— 打开后下游凭证会在无法验证对方身份的连接上传输。先读 [SECURITY.md 的「下游 TLS 校验」](SECURITY.md#下游-tls-校验)，导 CA 根证书是更好的做法 |
 | `MCP_GATEWAY_DB_USER` | 否 | `sa` | |
 | `MCP_GATEWAY_DB_PASSWORD` | 否 | 空 | |
+| `MCP_GATEWAY_SERVER_AGENT_INSTRUCTIONS_TEMPLATE` | 否 | 内置默认模板 | instructions 组合模板，占位符 `{{gatewayDescription}}` / `{{downstreams}}`；含未知或残缺 `{{...}}` 时启动失败；改动需重启。见 [§6.2](#62-网关接管了什么) |
 
 ### 7.2 application.yml 可调项
 
@@ -982,6 +992,7 @@ JSON-RPC `code` 映射：`TOOL_NOT_FOUND` / `TOOL_DISABLED` / `INVALID_TOOL_ARGU
 | `mcp-gateway.downstream.max-response-size` | `1048576` | 下游响应体上限，最小 1024 |
 | `mcp-gateway.server.max-request-size` | `1048576` | Agent 请求体上限，最小 1024 |
 | `mcp-gateway.server.max-downstream-per-gateway` | `3` | 每网关子 MCP 上限，最小 1 |
+| `mcp-gateway.server.agent-instructions-template` | 内置默认 | instructions 组合模板，见 [§6.2](#62-网关接管了什么) |
 | `management.endpoints.web.exposure.include` | `health` | **不要放开更多**。`health` 是唯一公开的非 UI 路径（容器 healthcheck 依赖），其余路径落在 `denyAll` 上返回 401 |
 
 覆盖方式：环境变量（relaxed binding，如 `MCP_GATEWAY_DOWNSTREAM_CALL_TIMEOUT`）、`-D` 系统属性、或外置 `application.yml`。
